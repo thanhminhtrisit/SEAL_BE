@@ -60,3 +60,8 @@ build/
 ### OS ###
 .DS_Store
 Thumbs.db
+
+### Office / temp files ###
+~$*
+*.tmp
+*~

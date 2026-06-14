@@ -10,7 +10,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: none   # SoT = db/schema.sql (run once). Was: update. Use validate only after entities are 100% stable.
     show-sql: false
     properties:
       hibernate:

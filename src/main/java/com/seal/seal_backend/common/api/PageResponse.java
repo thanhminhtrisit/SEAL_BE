@@ -1,0 +1,13 @@
+package com.seal.seal_backend.common.api;
+
+import org.springframework.data.domain.Page;
+import java.util.List;
+
+/** Standard paginated payload. Wrap a Spring Data Page: PageResponse.of(page). */
+public record PageResponse<T>(List<T> content, int page, int size,
+                              long totalElements, int totalPages, boolean last) {
+    public static <T> PageResponse<T> of(Page<T> p) {
+        return new PageResponse<>(p.getContent(), p.getNumber(), p.getSize(),
+                p.getTotalElements(), p.getTotalPages(), p.isLast());
+    }
+}
