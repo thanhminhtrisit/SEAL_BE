@@ -1249,3 +1249,58 @@ INSERT INTO scores (evaluation_id, criterion_id, score_value, comment) VALUES
 -- Điểm của Team 4 (Drop Tables) -> Đội bị loại, cố tình cho 10 điểm để test màng lọc
 INSERT INTO scores (evaluation_id, criterion_id, score_value, comment) VALUES
 (7, 5, 10.0, 'Nên bị loại'), (7, 6, 10.0, 'Nên bị loại'), (7, 7, 10.0, 'Nên bị loại'), (7, 8, 10.0, 'Nên bị loại');
+
+-- =========================================================
+-- 14. DATA MANIPULATION AWARD
+-- =========================================================
+
+USE seal_db;
+
+-- =====================================================================
+-- 1. TẠO EVENT SỐ 2 (AI HACKATHON) VÀ CÁC TEAM MỚI
+-- =====================================================================
+    INSERT INTO events (id, name, slug, event_type, discipline_id, term_plan_id, status, owner_coordinator_id, created_by)
+    VALUES (2, 'SEAL AI Hackathon Fall 2026', 'seal-ai-fall-2026', 'FALL', 2, 3, 'COMPLETED', 3, 3)
+        ON DUPLICATE KEY UPDATE name=name;
+
+-- Tạo Category cho Event 2
+    INSERT INTO categories (id, event_id, name, description, is_active)
+    VALUES (4, 2, 'Computer Vision', 'Nhận diện hình ảnh', TRUE)
+        ON DUPLICATE KEY UPDATE name=name;
+
+-- Tạo 3 Team cho Event 2 (Tái sử dụng các User ID 7, 8, 9 làm đội trưởng cho lẹ)
+    INSERT INTO teams (id, event_id, category_id, leader_id, name, description, status) VALUES
+                                                                                            (5, 2, 4, 7, 'Visionaries', 'AI Đỉnh cao', 'ACTIVE'),
+                                                                                            (6, 2, 4, 8, 'Deep Minds', 'Neural Networks', 'ACTIVE'),
+                                                                                            (7, 2, 4, 9, 'Auto Bots', 'Tự động hoá', 'ACTIVE')
+        ON DUPLICATE KEY UPDATE name=name;
+
+
+    -- =====================================================================
+-- 2. TẠO DỮ LIỆU XẾP HẠNG (RANKINGS) CHO EVENT 2
+-- =====================================================================
+-- Giả lập thuật toán đã chạy xong cho Event 2
+    INSERT INTO rankings (id, event_id, round_id, category_id, team_id, total_score, rank_position, is_promoted, computed_by, snapshot_note) VALUES
+                                                                                                                                                 (2, 2, 2, 4, 5, 95.500, 1, TRUE, 3, 'Kết quả chung kết Event 2'),
+                                                                                                                                                 (3, 2, 2, 4, 6, 88.000, 2, TRUE, 3, 'Kết quả chung kết Event 2'),
+                                                                                                                                                 (4, 2, 2, 4, 7, 85.250, 3, TRUE, 3, 'Kết quả chung kết Event 2')
+        ON DUPLICATE KEY UPDATE total_score=total_score;
+
+
+    -- =====================================================================
+-- 3. CHÈN CÁC GIẢI THƯỞNG (AWARDS) VÀO DATABASE (ĐÃ FIX LỖI KHÓA NGOẠI)
+-- =====================================================================
+
+-- Bổ sung giải thưởng cho EVENT 1
+-- Sử dụng Subquery để lấy ID xếp hạng thực tế của Team 1 thay vì hardcode số 1
+    INSERT INTO awards (event_id, team_id, ranking_id, award_type, description, awarded_by) VALUES
+                                                                                                (1, 1, (SELECT id FROM rankings WHERE event_id = 1 AND team_id = 1 LIMIT 1), 'SECOND_PLACE', 'Giải Nhì - Kỹ năng lập trình web và kiến trúc cực tốt', 3),
+(1, 3, NULL, 'THIRD_PLACE', 'Giải Ba - Khuyến khích ý tưởng tiềm năng', 3)
+    ON DUPLICATE KEY UPDATE description=VALUES(description);
+
+    -- Trao giải thưởng cho EVENT 2
+-- Sử dụng Subquery tương tự cho Event 2 để đảm bảo an toàn dữ liệu
+    INSERT INTO awards (event_id, team_id, ranking_id, award_type, description, awarded_by) VALUES
+                                                                                                (2, 5, (SELECT id FROM rankings WHERE event_id = 2 AND team_id = 5 LIMIT 1), 'FIRST_PLACE', 'Nhà vô địch bảng AI Computer Vision Fall 2026', 3),
+(2, 6, (SELECT id FROM rankings WHERE event_id = 2 AND team_id = 6 LIMIT 1), 'BEST_TECHNICAL', 'Giải thuật toán phức tạp và công nghệ đột phá', 3)
+    ON DUPLICATE KEY UPDATE description=VALUES(description);
