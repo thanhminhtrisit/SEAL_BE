@@ -1188,3 +1188,64 @@ VALUES
 -- SELECT * FROM evaluations;
 -- SELECT * FROM scores;
 -- SELECT * FROM rankings;
+
+-- =========================================================
+-- 13. DATA MANIPULATION RANKING
+-- =========================================================
+
+-- 1. TẠO 3 USER MỚI LÀM ĐỘI TRƯỞNG (ID từ 10 đến 12)
+INSERT INTO users (id, email, password_hash, full_name, primary_role_id, account_type, status) VALUES
+(10, 'leader.cyber@student.local', 'hash_stub', 'Leader Cyber Ninjas', 6, 'PARTICIPANT', 'ACTIVE'),
+(11, 'leader.null@student.local', 'hash_stub', 'Leader Null Pointers', 6, 'PARTICIPANT', 'ACTIVE'),
+(12, 'leader.drop@student.local', 'hash_stub', 'Leader Drop Tables', 6, 'PARTICIPANT', 'ACTIVE');
+
+-- 2. TẠO 3 ĐỘI THI MỚI VÀO VÒNG 1 (EVENT 1, CATEGORY 1)
+-- Lưu ý: Team 4 bị DISQUALIFIED
+INSERT INTO teams (id, event_id, category_id, leader_id, name, description, status) VALUES
+(2, 1, 1, 10, 'Cyber Ninjas', 'Đội xuất sắc, điểm cao', 'ACTIVE'),
+(3, 1, 1, 11, 'Null Pointers', 'Đội trung bình, điểm thấp', 'ACTIVE'),
+(4, 1, 1, 12, 'Drop Tables', 'Đội vi phạm quy chế', 'DISQUALIFIED');
+
+-- 3. TẠO BÀI NỘP VÀ VERSION CHO 3 ĐỘI
+INSERT INTO submissions (id, team_id, round_id, status) VALUES
+(2, 2, 1, 'SUBMITTED'),
+(3, 3, 1, 'SUBMITTED'),
+(4, 4, 1, 'DISQUALIFIED'); -- Bị loại
+
+INSERT INTO submission_versions (id, submission_id, version_number, repo_url, submitted_by) VALUES
+(2, 2, 1, 'https://github.com/demo/cyber-ninjas', 10),
+(3, 3, 1, 'https://github.com/demo/null-pointers', 11),
+(4, 4, 1, 'https://github.com/demo/drop-tables', 12);
+
+-- Update lại current_version cho các submission
+UPDATE submissions SET current_version_id = 2 WHERE id = 2;
+UPDATE submissions SET current_version_id = 3 WHERE id = 3;
+UPDATE submissions SET current_version_id = 4 WHERE id = 4;
+
+-- 4. TẠO EVALUATIONS (Phân công Giám khảo 4 và 5 chấm điểm)
+-- Judge 4 (Internal Judge) và Judge 5 (Guest Judge)
+INSERT INTO evaluations (id, judge_assignment_id, judge_id, submission_version_id, round_id, status) VALUES
+(3, 1, 4, 2, 1, 'SUBMITTED'), -- Judge 4 chấm Team 2
+(4, 2, 5, 2, 1, 'SUBMITTED'), -- Judge 5 chấm Team 2
+
+(5, 1, 4, 3, 1, 'SUBMITTED'), -- Judge 4 chấm Team 3
+(6, 2, 5, 3, 1, 'SUBMITTED'), -- Judge 5 chấm Team 3
+
+(7, 1, 4, 4, 1, 'SUBMITTED'); -- Judge 4 chấm Team 4 (Đội bị loại)
+
+-- 5. CHÈN ĐIỂM SỐ CHI TIẾT
+-- ID Tiêu chí: 5(Tech 40%), 6(Innov 25%), 7(UI 20%), 8(Pres 15%)
+
+-- Điểm của Team 2 (Cyber Ninjas) -> Sẽ vô địch
+INSERT INTO scores (evaluation_id, criterion_id, score_value, comment) VALUES
+(3, 5, 9.0, 'Code xuất sắc'), (3, 6, 9.5, 'Rất sáng tạo'), (3, 7, 8.5, 'UI đẹp'), (3, 8, 9.0, 'Thuyết trình tự tin'),
+(4, 5, 9.5, 'Kiến trúc tốt'), (4, 6, 9.0, 'Ý tưởng hay'), (4, 7, 8.5, 'Dễ dùng'), (4, 8, 8.5, 'Trình bày rõ ràng');
+
+-- Điểm của Team 3 (Null Pointers) -> Sẽ xếp bét
+INSERT INTO scores (evaluation_id, criterion_id, score_value, comment) VALUES
+(5, 5, 6.0, 'Nhiều bug'), (5, 6, 6.5, 'Bình thường'), (5, 7, 5.5, 'UI hơi rối'), (5, 8, 6.0, 'Thuyết trình lúng túng'),
+(6, 5, 6.5, 'Chấp nhận được'), (6, 6, 6.0, 'Không mới mẻ'), (6, 7, 5.5, 'Khó dùng'), (6, 8, 6.5, 'Bị run');
+
+-- Điểm của Team 4 (Drop Tables) -> Đội bị loại, cố tình cho 10 điểm để test màng lọc
+INSERT INTO scores (evaluation_id, criterion_id, score_value, comment) VALUES
+(7, 5, 10.0, 'Nên bị loại'), (7, 6, 10.0, 'Nên bị loại'), (7, 7, 10.0, 'Nên bị loại'), (7, 8, 10.0, 'Nên bị loại');

@@ -1,11 +1,15 @@
 package com.seal.seal_backend.ranking.service.impl;
 
+import com.seal.seal_backend.domain.entity.*;
+import com.seal.seal_backend.domain.repository.RankingRepository;
 import com.seal.seal_backend.ranking.dto.response.RankingResponse;
 import com.seal.seal_backend.ranking.service.RankingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -14,112 +18,119 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RankingServiceImpl implements RankingService {
 
-    // --- CÁC CLASS RECORD TẠM THỜI ĐỂ CHỨA DỮ LIỆU TỪ MODULE KHÁC ---
-    // Sau này bạn sẽ dùng DTO thật từ shared/contract của M1 & M2
-    record TeamView(Long id, String name, String status) {}
-    record CriterionView(Long id, Double weight) {} // Trọng số: ví dụ 0.4 = 40%
-    record ScoreView(Long teamId, Long criterionId, Double scoreValue) {}
+    private final RankingRepository rankingRepository;
+    private final RankingDataProvider dataProvider;
 
     @Override
+    @Transactional
     public List<RankingResponse> computeRankingForRound(Long roundId, Long userId) {
         log.info("Bắt đầu thuật toán tính toán xếp hạng cho round: {}", roundId);
 
-        // ====================================================================================
-        // PHẦN 1: LẤY DỮ LIỆU (Đang dùng Mock Data, sau này thay bằng gọi qua Port)
-        // ====================================================================================
+        // 1. LẤY DỮ LIỆU TỪ MYSQL
+        List<RankingDataProvider.TeamView> allTeams = dataProvider.getTeamsInRound(roundId);
+        List<RankingDataProvider.CriterionView> criteria = dataProvider.getCriteriaForRound(roundId);
+        List<RankingDataProvider.ScoreView> allScores = dataProvider.getScoresForRound(roundId);
 
-        // 1. Lấy danh sách Team (Giả sử lấy từ TeamQueryPort)
-        List<TeamView> allTeams = List.of(
-                new TeamView(101L, "Team Alpha", "ACTIVE"),
-                new TeamView(102L, "Team Beta", "ACTIVE"),
-                new TeamView(103L, "Team Gamma", "DISQUALIFIED") // Team này sẽ bị loại theo BR-RNK-04
-        );
+        int promotionTopN = 10;
 
-        // 2. Lấy tiêu chí chấm điểm và trọng số của vòng này (Giả sử lấy từ EventQueryPort)
-        List<CriterionView> criteria = List.of(
-                new CriterionView(1L, 0.4), // Tiêu chí 1: 40% số điểm
-                new CriterionView(2L, 0.6)  // Tiêu chí 2: 60% số điểm
-        );
-
-        // 3. Lấy tất cả điểm giám khảo đã chấm (Giả sử lấy từ ScoringQueryPort)
-        List<ScoreView> allScores = List.of(
-                // Điểm của Team Alpha (2 giám khảo chấm)
-                new ScoreView(101L, 1L, 90.0), new ScoreView(101L, 2L, 85.0), // Giám khảo A
-                new ScoreView(101L, 1L, 80.0), new ScoreView(101L, 2L, 95.0), // Giám khảo B
-
-                // Điểm của Team Beta (2 giám khảo chấm)
-                new ScoreView(102L, 1L, 70.0), new ScoreView(102L, 2L, 75.0), // Giám khảo A
-                new ScoreView(102L, 1L, 80.0), new ScoreView(102L, 2L, 85.0)  // Giám khảo B
-        );
-
-        int promotionTopN = 1; // Giả sử quy tắc (BR-RNK-05) là chỉ Top 1 được thăng hạng
-
-        // ====================================================================================
-        // PHẦN 2: THUẬT TOÁN TÍNH ĐIỂM BẰNG JAVA STREAM (LOGIC THẬT)
-        // ====================================================================================
-
-        // BƯỚC 1: Lọc team theo BR-RNK-04 (Loại bỏ DISQUALIFIED)
-        List<TeamView> validTeams = allTeams.stream()
+        // 2. THUẬT TOÁN TÍNH ĐIỂM
+        List<RankingDataProvider.TeamView> validTeams = allTeams.stream()
                 .filter(team -> !"DISQUALIFIED".equals(team.status()))
                 .toList();
 
-        // BƯỚC 2: Nhóm toàn bộ điểm số theo từng TeamId
-        Map<Long, List<ScoreView>> scoresGroupedByTeam = allScores.stream()
-                .collect(Collectors.groupingBy(ScoreView::teamId));
+        Map<Long, List<RankingDataProvider.ScoreView>> scoresGroupedByTeam = allScores.stream()
+                .collect(Collectors.groupingBy(RankingDataProvider.ScoreView::teamId));
 
-        List<RankingResponse> rankings = new ArrayList<>();
+        List<RankingResponse> preliminaryRankings = new ArrayList<>();
 
-        // BƯỚC 3: Tính điểm cho từng Team hợp lệ
-        for (TeamView team : validTeams) {
-            List<ScoreView> teamScores = scoresGroupedByTeam.getOrDefault(team.id(), List.of());
+        for (RankingDataProvider.TeamView team : validTeams) {
+            List<RankingDataProvider.ScoreView> teamScores = scoresGroupedByTeam.getOrDefault(team.id(), List.of());
 
-            // Nhóm điểm của team này theo Từng Tiêu Chí (CriterionId) và TÍNH ĐIỂM TRUNG BÌNH của tiêu chí đó
             Map<Long, Double> avgScoreByCriterion = teamScores.stream()
-                    .collect(Collectors.groupingBy(
-                            ScoreView::criterionId,
-                            Collectors.averagingDouble(ScoreView::scoreValue) // Tính trung bình cộng
-                    ));
+                    .collect(Collectors.groupingBy(RankingDataProvider.ScoreView::criterionId,
+                            Collectors.averagingDouble(RankingDataProvider.ScoreView::scoreValue)));
 
-            // Áp dụng BR-RNK-02: Final = SUM(Average * Weight)
             double finalScore = 0.0;
-            for (CriterionView criterion : criteria) {
-                double avgScore = avgScoreByCriterion.getOrDefault(criterion.id(), 0.0);
-                finalScore += avgScore * criterion.weight();
+            for (RankingDataProvider.CriterionView criterion : criteria) {
+                double actualWeight = criterion.weight() / 100.0;
+                finalScore += avgScoreByCriterion.getOrDefault(criterion.id(), 0.0) * actualWeight;
             }
 
-            // Tạo đối tượng RankingResponse (Tạm thời rank = 0, isPromoted = false)
-            rankings.add(new RankingResponse(
+            preliminaryRankings.add(new RankingResponse(
                     null, team.id(), team.name(), roundId,
-                    Math.round(finalScore * 100.0) / 100.0, // Làm tròn 2 chữ số thập phân
-                    0, false
-            ));
+                    Math.round(finalScore * 1000.0) / 1000.0, 0, false));
         }
 
-        // BƯỚC 4: Sắp xếp danh sách giảm dần theo điểm tổng
-        rankings.sort(Comparator.comparing(RankingResponse::totalScore).reversed());
+        preliminaryRankings.sort(Comparator.comparing(RankingResponse::totalScore).reversed());
 
-        // BƯỚC 5: Gán thứ hạng (Rank) và xét thăng hạng (Promotion) theo BR-RNK-05
-        List<RankingResponse> finalRankings = new ArrayList<>();
+        // 3. XÓA CŨ & LƯU MỚI (Dùng Setter và Proxy Object)
+        log.info("Xóa bảng xếp hạng cũ của vòng thi: {}", roundId);
+        rankingRepository.deleteByRoundId(roundId);
+
+        List<Ranking> entitiesToSave = new ArrayList<>();
         int currentRank = 1;
 
-        for (RankingResponse r : rankings) {
+        for (RankingResponse r : preliminaryRankings) {
             boolean isPromoted = currentRank <= promotionTopN;
-            finalRankings.add(new RankingResponse(
-                    r.rankingId(), r.teamId(), r.teamName(), r.roundId(),
-                    r.totalScore(), currentRank, isPromoted
-            ));
+
+            // Tạo các Dummy Object chỉ chứa ID để JPA tự map Foreign Key
+            Event eventRef = new Event(); eventRef.setId(1L);
+            Round roundRef = new Round(); roundRef.setId(roundId);
+            Category categoryRef = new Category(); categoryRef.setId(1L);
+            Team teamRef = new Team(); teamRef.setId(r.teamId());
+            User userRef = new User(); userRef.setId(userId);
+
+            // Dùng Setter chuẩn của Entity
+            Ranking entity = new Ranking();
+            entity.setEvent(eventRef);
+            entity.setRound(roundRef);
+            entity.setCategory(categoryRef);
+            entity.setTeam(teamRef);
+
+            // Ép kiểu Double về BigDecimal
+            entity.setTotalScore(BigDecimal.valueOf(r.totalScore()));
+            entity.setRankPosition(currentRank);
+            entity.setIsPromoted(isPromoted);
+            entity.setComputedBy(userRef);
+            entity.setSnapshotNote("Computed from MySQL real data");
+
+            entitiesToSave.add(entity);
             currentRank++;
         }
 
-        // BƯỚC 6: Xóa Ranking cũ và Lưu danh sách finalRankings vào Database
-        // rankingRepository.deleteByRoundId(roundId);
-        // ... code lưu DB ở đây
+        List<Ranking> savedEntities = rankingRepository.saveAll(entitiesToSave);
 
-        return finalRankings;
+        // 4. MAP NGƯỢC RA DTO (Phải gọi e.getTeam().getId() thay vì e.getTeamId())
+        Map<Long, String> teamNameMap = validTeams.stream()
+                .collect(Collectors.toMap(RankingDataProvider.TeamView::id, RankingDataProvider.TeamView::name));
+
+        return savedEntities.stream()
+                .map(e -> new RankingResponse(
+                        e.getId(),
+                        e.getTeam().getId(),
+                        teamNameMap.getOrDefault(e.getTeam().getId(), "Unknown"),
+                        e.getRound().getId(),
+                        e.getTotalScore().doubleValue(), // Đưa BigDecimal về lại Double cho DTO
+                        e.getRankPosition(),
+                        e.getIsPromoted()
+                ))
+                .collect(Collectors.toList());
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<RankingResponse> getRankingsByRound(Long roundId) {
-        return List.of();
+        return rankingRepository.findByRoundIdOrderByRankPositionAsc(roundId)
+                .stream()
+                .map(e -> new RankingResponse(
+                        e.getId(),
+                        e.getTeam().getId(),
+                        "Team-" + e.getTeam().getId(),
+                        e.getRound().getId(),
+                        e.getTotalScore().doubleValue(),
+                        e.getRankPosition(),
+                        e.getIsPromoted()
+                ))
+                .collect(Collectors.toList());
     }
 }
