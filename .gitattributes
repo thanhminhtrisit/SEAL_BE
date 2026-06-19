@@ -1,2 +1,23 @@
-/mvnw text eol=lf
+# Normalize line-endings so the whole team (Windows/Mac/Linux) avoids CRLF<->LF noise diffs.
+# Default: store every text file as LF in git.
+* text=auto eol=lf
+
+# Windows scripts keep CRLF
 *.cmd text eol=crlf
+*.bat text eol=crlf
+# Unix maven wrapper keeps LF
+/mvnw text eol=lf
+
+# Binary files: git must not touch them
+*.jar  binary
+*.war  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.drawio binary
