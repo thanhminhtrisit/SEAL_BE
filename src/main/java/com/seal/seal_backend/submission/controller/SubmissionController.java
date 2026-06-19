@@ -1,14 +1,19 @@
 package com.seal.seal_backend.submission.controller;
 
 import com.seal.seal_backend.common.api.ApiResponse;
-import com.seal.seal_backend.submission.dto.request.CreateSubmissionRequestDTO;
+import com.seal.seal_backend.submission.dto.request.*;
+import com.seal.seal_backend.submission.dto.response.SubmissionDetailResponseDTO;
 import com.seal.seal_backend.submission.dto.response.SubmissionResponseDTO;
+import com.seal.seal_backend.submission.dto.response.SubmissionVersionResponseDTO;
 import com.seal.seal_backend.submission.service.SubmissionService;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * Flow: Project submission tracking
@@ -18,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController
 @RequestMapping("/api/submissions")
+@SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Submission Tracking")
 @RequiredArgsConstructor
 public class SubmissionController {
@@ -37,6 +43,102 @@ public class SubmissionController {
     ) {
         return ResponseEntity.ok(
                 submissionService.createSubmission(request, userId)
+        );
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<SubmissionDetailResponseDTO>
+    getSubmission(@PathVariable Long id) {
+
+        return ResponseEntity.ok(
+                submissionService.getSubmission(id)
+        );
+    }
+
+    @GetMapping("/{id}/current-version")
+    public ResponseEntity<SubmissionVersionResponseDTO>
+    getCurrentVersion(@PathVariable Long id) {
+
+        return ResponseEntity.ok(
+                submissionService.getCurrentVersion(id)
+        );
+    }
+
+    @GetMapping("/{id}/versions")
+    public ResponseEntity<List<SubmissionVersionResponseDTO>>
+    getVersions(@PathVariable Long id) {
+
+        return ResponseEntity.ok(
+                submissionService.getVersions(id)
+        );
+    }
+
+    @PostMapping("/{id}/versions")
+    public ResponseEntity<SubmissionVersionResponseDTO>
+    createVersion(
+            @PathVariable Long id,
+            @RequestBody CreateVersionRequestDTO request,
+            @RequestParam Long userId
+    ) {
+
+        return ResponseEntity.ok(
+                submissionService.createVersion(
+                        id,
+                        request,
+                        userId
+                )
+        );
+    }
+
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<Void> updateStatus(
+            @PathVariable Long id,
+            @RequestBody UpdateStatusRequestDTO request
+    ) {
+
+        submissionService.updateStatus(
+                id,
+                request.getStatus()
+        );
+
+        return ResponseEntity.ok().build();
+    }
+
+    @PutMapping("/versions/{versionId}")
+    public ResponseEntity<SubmissionVersionResponseDTO>
+    updateVersion(
+            @PathVariable Long versionId,
+            @RequestBody UpdateSubmissionVersionRequestDTO request
+    ) {
+
+        return ResponseEntity.ok(
+                submissionService.updateVersion(
+                        versionId,
+                        request
+                )
+        );
+    }
+
+    @PatchMapping("/{submissionId}/select-version")
+    public ResponseEntity<Void> selectVersion(
+            @PathVariable Long submissionId,
+            @RequestBody SelectSubmissionVersionRequestDTO request
+    ) {
+
+        submissionService.selectCurrentVersion(
+                submissionId,
+                request.getVersionId()
+        );
+
+        return ResponseEntity.ok().build();
+    }
+
+    @GetMapping
+    public ResponseEntity<List<SubmissionDetailResponseDTO>>
+    getAllSubmissions() {
+
+        return ResponseEntity.ok(
+                submissionService.getAllSubmissions()
         );
     }
 }

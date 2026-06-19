@@ -4,11 +4,17 @@ import com.seal.seal_backend.domain.entity.*;
 import com.seal.seal_backend.domain.enums.SubmissionStatus;
 import com.seal.seal_backend.domain.repository.*;
 import com.seal.seal_backend.submission.dto.request.CreateSubmissionRequestDTO;
+import com.seal.seal_backend.submission.dto.request.UpdateSubmissionVersionRequestDTO;
+import com.seal.seal_backend.submission.dto.response.SubmissionDetailResponseDTO;
 import com.seal.seal_backend.submission.dto.response.SubmissionResponseDTO;
+import com.seal.seal_backend.submission.dto.response.SubmissionVersionResponseDTO;
 import com.seal.seal_backend.submission.service.SubmissionService;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import com.seal.seal_backend.submission.dto.request.CreateVersionRequestDTO;
+
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -69,6 +75,286 @@ public class SubmissionServiceImpl implements SubmissionService {
         dto.setRepoUrl(version.getRepoUrl());
         dto.setStatus(submission.getStatus().name());
         dto.setSubmittedAt(submission.getSubmittedAt());
+
+        return dto;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SubmissionDetailResponseDTO getSubmission(Long submissionId) {
+
+        Submission submission = submissionRepository.findById(submissionId)
+                .orElseThrow(() -> new RuntimeException("Submission not found"));
+
+        SubmissionDetailResponseDTO dto =
+                new SubmissionDetailResponseDTO();
+
+        dto.setSubmissionId(submission.getId());
+        dto.setTeamId(submission.getTeam().getId());
+        dto.setRoundId(submission.getRound().getId());
+        dto.setCurrentVersionId(submission.getCurrentVersionId());
+        dto.setStatus(submission.getStatus().name());
+        dto.setSubmittedAt(submission.getSubmittedAt());
+        dto.setLastUpdatedAt(submission.getLastUpdatedAt());
+
+        return dto;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SubmissionVersionResponseDTO getCurrentVersion(
+            Long submissionId
+    ) {
+
+        Submission submission = submissionRepository.findById(submissionId)
+                .orElseThrow(() -> new RuntimeException("Submission not found"));
+
+        Long currentVersionId = submission.getCurrentVersionId();
+
+        SubmissionVersion version =
+                submissionVersionRepository.findById(currentVersionId)
+                        .orElseThrow(() ->
+                                new RuntimeException("Version not found"));
+
+        return mapVersion(version);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SubmissionVersionResponseDTO> getVersions(
+            Long submissionId
+    ) {
+
+        return submissionVersionRepository
+                .findBySubmissionIdOrderByVersionNumberDesc(submissionId)
+                .stream()
+                .map(this::mapVersion)
+                .toList();
+    }
+
+
+    @Override
+    @Transactional
+    public SubmissionVersionResponseDTO createVersion(
+            Long submissionId,
+            CreateVersionRequestDTO request,
+            Long userId
+    ) {
+
+        Submission submission = submissionRepository.findById(submissionId)
+                .orElseThrow(() -> new RuntimeException("Submission not found"));
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        Integer nextVersion =
+                submissionVersionRepository
+                        .findTopBySubmissionIdOrderByVersionNumberDesc(
+                                submissionId
+                        )
+                        .map(v -> v.getVersionNumber() + 1)
+                        .orElse(1);
+
+        SubmissionVersion version = new SubmissionVersion();
+
+        version.setSubmission(submission);
+        version.setVersionNumber(nextVersion);
+
+        version.setRepoUrl(request.getRepoUrl());
+        version.setDemoUrl(request.getDemoUrl());
+        version.setSlideUrl(request.getSlideUrl());
+        version.setReportUrl(request.getReportUrl());
+
+        version.setSubmittedBy(user);
+        version.setChangeNote(request.getChangeNote());
+
+        version = submissionVersionRepository.save(version);
+
+        submission.setCurrentVersionId(version.getId());
+        submission.setLastUpdatedAt(java.time.LocalDateTime.now());
+
+        submissionRepository.save(submission);
+
+        return mapVersion(version);
+    }
+
+    @Override
+    @Transactional
+    public void updateStatus(
+            Long submissionId,
+            SubmissionStatus status
+    ) {
+
+        Submission submission =
+                submissionRepository.findById(submissionId)
+                        .orElseThrow(() ->
+                                new RuntimeException("Submission not found"));
+
+        submission.setStatus(status);
+
+        submissionRepository.save(submission);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SubmissionDetailResponseDTO> getByTeam(Long teamId) {
+
+        return submissionRepository.findByTeamId(teamId)
+                .stream()
+                .map(this::mapSubmission)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SubmissionDetailResponseDTO> getByRound(Long roundId) {
+
+        return submissionRepository.findByRoundId(roundId)
+                .stream()
+                .map(this::mapSubmission)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SubmissionDetailResponseDTO getByTeamAndRound(
+            Long teamId,
+            Long roundId
+    ) {
+
+        Submission submission =
+                submissionRepository
+                        .findByTeamIdAndRoundId(teamId, roundId)
+                        .orElseThrow(() ->
+                                new RuntimeException("Submission not found"));
+
+        return mapSubmission(submission);
+    }
+
+    @Override
+    @Transactional
+    public SubmissionVersionResponseDTO updateVersion(
+            Long versionId,
+            UpdateSubmissionVersionRequestDTO request
+    ) {
+
+        SubmissionVersion version =
+                submissionVersionRepository.findById(versionId)
+                        .orElseThrow(() ->
+                                new RuntimeException("Version not found"));
+
+        if (request.getRepoUrl() != null) {
+            version.setRepoUrl(request.getRepoUrl());
+        }
+
+        if (request.getDemoUrl() != null) {
+            version.setDemoUrl(request.getDemoUrl());
+        }
+
+        if (request.getSlideUrl() != null) {
+            version.setSlideUrl(request.getSlideUrl());
+        }
+
+        if (request.getReportUrl() != null) {
+            version.setReportUrl(request.getReportUrl());
+        }
+
+        if (request.getChangeNote() != null) {
+            version.setChangeNote(request.getChangeNote());
+        }
+
+        version = submissionVersionRepository.save(version);
+
+        Submission submission = version.getSubmission();
+        submission.setLastUpdatedAt(java.time.LocalDateTime.now());
+
+        submissionRepository.save(submission);
+
+        return mapVersion(version);
+    }
+
+    @Override
+    @Transactional
+    public void selectCurrentVersion(
+            Long submissionId,
+            Long versionId
+    ) {
+
+        Submission submission =
+                submissionRepository.findById(submissionId)
+                        .orElseThrow(() ->
+                                new RuntimeException("Submission not found"));
+
+        SubmissionVersion version =
+                submissionVersionRepository.findById(versionId)
+                        .orElseThrow(() ->
+                                new RuntimeException("Version not found"));
+
+        if (!version.getSubmission().getId().equals(submissionId)) {
+            throw new RuntimeException(
+                    "Version does not belong to this submission"
+            );
+        }
+
+        submission.setCurrentVersionId(versionId);
+        submission.setLastUpdatedAt(
+                java.time.LocalDateTime.now()
+        );
+
+        submissionRepository.save(submission);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SubmissionDetailResponseDTO> getAllSubmissions() {
+
+        return submissionRepository.findAll()
+                .stream()
+                .map(this::mapSubmission)
+                .toList();
+    }
+
+    private SubmissionVersionResponseDTO mapVersion(
+            SubmissionVersion version
+    ) {
+
+        SubmissionVersionResponseDTO dto =
+                new SubmissionVersionResponseDTO();
+
+        dto.setVersionId(version.getId());
+        dto.setVersionNumber(version.getVersionNumber());
+
+        dto.setRepoUrl(version.getRepoUrl());
+        dto.setDemoUrl(version.getDemoUrl());
+        dto.setSlideUrl(version.getSlideUrl());
+        dto.setReportUrl(version.getReportUrl());
+
+        dto.setChangeNote(version.getChangeNote());
+
+        dto.setSubmittedBy(version.getSubmittedBy().getId());
+
+        dto.setSubmittedAt(version.getSubmittedAt());
+
+        return dto;
+    }
+
+    private SubmissionDetailResponseDTO mapSubmission(
+            Submission submission
+    ) {
+
+        SubmissionDetailResponseDTO dto =
+                new SubmissionDetailResponseDTO();
+
+        dto.setSubmissionId(submission.getId());
+        dto.setTeamId(submission.getTeam().getId());
+        dto.setRoundId(submission.getRound().getId());
+
+        dto.setCurrentVersionId(submission.getCurrentVersionId());
+
+        dto.setStatus(submission.getStatus().name());
+
+        dto.setSubmittedAt(submission.getSubmittedAt());
+        dto.setLastUpdatedAt(submission.getLastUpdatedAt());
 
         return dto;
     }
