@@ -123,4 +123,39 @@ public class EventController {
             @PathVariable Long eventId, @PathVariable Long setId) {
         return ApiResponse.ok(eventService.getCriteriaSet(eventId, setId));
     }
+
+    // ─── Category (FR-EVT-04) ─────────────────────────────────────────────────
+
+    @PostMapping("/{eventId}/categories")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Create category for event (FR-EVT-04)")
+    public ResponseEntity<ApiResponse<CategoryResponse>> addCategory(
+            @PathVariable Long eventId,
+            @Valid @RequestBody CreateCategoryRequest req) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(eventService.addCategory(eventId, req)));
+    }
+
+    @GetMapping("/{eventId}/categories")
+    @Operation(summary = "List categories for event")
+    public ApiResponse<List<CategoryResponse>> listCategories(@PathVariable Long eventId) {
+        return ApiResponse.ok(eventService.listCategories(eventId));
+    }
+
+    @GetMapping("/{eventId}/categories/{categoryId}")
+    @Operation(summary = "Get category by id")
+    public ApiResponse<CategoryResponse> getCategory(
+            @PathVariable Long eventId, @PathVariable Long categoryId) {
+        return ApiResponse.ok(eventService.getCategory(eventId, categoryId));
+    }
+
+    @PatchMapping("/{eventId}/categories/{categoryId}")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Update category (name, description, mentor, active flag)")
+    public ApiResponse<CategoryResponse> updateCategory(
+            @PathVariable Long eventId,
+            @PathVariable Long categoryId,
+            @Valid @RequestBody UpdateCategoryRequest req) {
+        return ApiResponse.ok(eventService.updateCategory(eventId, categoryId, req));
+    }
 }

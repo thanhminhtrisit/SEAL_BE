@@ -22,4 +22,10 @@ public interface EventService {
     CriteriaSetResponse addCriteriaSet(Long eventId, CreateCriteriaSetRequest req, Long creatorId);
     List<CriteriaSetResponse> listCriteriaSets(Long eventId);
     CriteriaSetResponse getCriteriaSet(Long eventId, Long setId);
+
+    // --- Category (FR-EVT-04) ---
+    CategoryResponse addCategory(Long eventId, CreateCategoryRequest req);
+    List<CategoryResponse> listCategories(Long eventId);
+    CategoryResponse getCategory(Long eventId, Long categoryId);
+    CategoryResponse updateCategory(Long eventId, Long categoryId, UpdateCategoryRequest req);
 }

@@ -27,6 +27,7 @@ public class EventServiceImpl implements EventService {
     private final DisciplineRepository disciplineRepository;
     private final TermPlanRepository termPlanRepository;
     private final UserRepository userRepository;
+    private final CategoryRepository categoryRepository;
 
     // ─── Event ────────────────────────────────────────────────────────────────
 
@@ -224,6 +225,73 @@ public class EventServiceImpl implements EventService {
         return CriteriaSetResponse.from(cs, criteria);
     }
 
+    // ─── Category (FR-EVT-04) ─────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public CategoryResponse addCategory(Long eventId, CreateCategoryRequest req) {
+        Event event = findEvent(eventId);
+
+        if (categoryRepository.existsByEventIdAndName(eventId, req.name())) {
+            throw new BusinessRuleException("BR-EVT-04",
+                    "Category name '" + req.name() + "' already exists in this event");
+        }
+
+        User mentor = null;
+        if (req.mentorId() != null) {
+            mentor = userRepository.findById(req.mentorId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Mentor not found: " + req.mentorId()));
+        }
+
+        Category cat = new Category();
+        cat.setEvent(event);
+        cat.setName(req.name());
+        cat.setDescription(req.description());
+        cat.setMentor(mentor);
+        cat.setIsActive(true);
+
+        return CategoryResponse.from(categoryRepository.save(cat));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CategoryResponse> listCategories(Long eventId) {
+        findEvent(eventId);
+        return categoryRepository.findByEventIdOrderByCreatedAtAsc(eventId)
+                .stream().map(CategoryResponse::from).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CategoryResponse getCategory(Long eventId, Long categoryId) {
+        findEvent(eventId);
+        return CategoryResponse.from(findCategory(categoryId, eventId));
+    }
+
+    @Override
+    @Transactional
+    public CategoryResponse updateCategory(Long eventId, Long categoryId, UpdateCategoryRequest req) {
+        findEvent(eventId);
+        Category cat = findCategory(categoryId, eventId);
+
+        if (req.name() != null && !req.name().isBlank() && !req.name().equals(cat.getName())) {
+            if (categoryRepository.existsByEventIdAndName(eventId, req.name())) {
+                throw new BusinessRuleException("BR-EVT-04",
+                        "Category name '" + req.name() + "' already exists in this event");
+            }
+            cat.setName(req.name());
+        }
+        if (req.description() != null) cat.setDescription(req.description());
+        if (req.active() != null) cat.setIsActive(req.active());
+        if (req.mentorId() != null) {
+            User mentor = userRepository.findById(req.mentorId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Mentor not found: " + req.mentorId()));
+            cat.setMentor(mentor);
+        }
+
+        return CategoryResponse.from(categoryRepository.save(cat));
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private Event findEvent(Long id) {
@@ -238,6 +306,15 @@ public class EventServiceImpl implements EventService {
             throw new ResourceNotFoundException("Round " + roundId + " does not belong to event " + eventId);
         }
         return round;
+    }
+
+    private Category findCategory(Long categoryId, Long eventId) {
+        Category cat = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
+        if (!cat.getEvent().getId().equals(eventId)) {
+            throw new ResourceNotFoundException("Category " + categoryId + " does not belong to event " + eventId);
+        }
+        return cat;
     }
 
     private String uniqueSlug(String name) {
