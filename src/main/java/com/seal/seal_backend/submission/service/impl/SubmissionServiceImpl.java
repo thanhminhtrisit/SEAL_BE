@@ -144,6 +144,8 @@ public class SubmissionServiceImpl implements SubmissionService {
         Submission submission = submissionRepository.findById(submissionId)
                 .orElseThrow(() -> new RuntimeException("Submission not found"));
 
+        validateSubmissionEditable(submission);
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
@@ -285,6 +287,8 @@ public class SubmissionServiceImpl implements SubmissionService {
                         .orElseThrow(() ->
                                 new RuntimeException("Submission not found"));
 
+        validateSubmissionEditable(submission);
+
         SubmissionVersion version =
                 submissionVersionRepository.findById(versionId)
                         .orElseThrow(() ->
@@ -357,5 +361,67 @@ public class SubmissionServiceImpl implements SubmissionService {
         dto.setLastUpdatedAt(submission.getLastUpdatedAt());
 
         return dto;
+    }
+
+    private void validateSubmissionEditable(
+            Submission submission) {
+
+        SubmissionStatus status = submission.getStatus();
+
+        if (status == SubmissionStatus.LOCKED) {
+            throw new RuntimeException(
+                    "Submission has been locked"
+            );
+        }
+
+        if (status == SubmissionStatus.DISQUALIFIED) {
+            throw new RuntimeException(
+                    "Submission has been disqualified"
+            );
+        }
+
+        if (status == SubmissionStatus.LATE_REJECTED) {
+            throw new RuntimeException(
+                    "Submission was rejected because of deadline violation"
+            );
+        }
+    }
+
+    private void validateStatusTransition(
+            SubmissionStatus current,
+            SubmissionStatus target
+    ) {
+
+        switch (current) {
+
+            case DRAFT -> {
+                if (target != SubmissionStatus.SUBMITTED
+                        && target != SubmissionStatus.DISQUALIFIED
+                        && target != SubmissionStatus.LATE_REJECTED) {
+
+                    throw new RuntimeException(
+                            "Invalid status transition"
+                    );
+                }
+            }
+
+            case SUBMITTED -> {
+                if (target != SubmissionStatus.LOCKED
+                        && target != SubmissionStatus.DISQUALIFIED) {
+
+                    throw new RuntimeException(
+                            "Invalid status transition"
+                    );
+                }
+            }
+
+            case LOCKED,
+                 DISQUALIFIED,
+                 LATE_REJECTED ->
+
+                    throw new RuntimeException(
+                            "Cannot change final status"
+                    );
+        }
     }
 }
