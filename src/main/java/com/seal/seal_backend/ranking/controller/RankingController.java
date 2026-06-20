@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/rankings")
@@ -44,5 +45,21 @@ public class RankingController {
     // @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<List<RankingResponse>>> getRankings(@PathVariable Long roundId) {
         return ResponseEntity.ok(ApiResponse.ok(rankingService.getRankingsByRound(roundId)));
+    }
+
+    @PostMapping("/teams/{teamId}/disqualify")
+    @Operation(summary = "Đình chỉ đội thi do vi phạm (FR-RNK-04)")
+    // @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
+    public ResponseEntity<ApiResponse<String>> disqualifyTeam(
+            @PathVariable Long teamId,
+            @RequestBody Map<String, String> requestBody
+            // @CurrentUser Long userId
+    ) {
+        String reason = requestBody.get("reason");
+        Long fakeUserId = 1L; // Cố định id người dùng để test
+
+        rankingService.disqualifyTeam(teamId, reason, fakeUserId);
+
+        return ResponseEntity.ok(ApiResponse.ok("Đã đình chỉ đội thi thành công"));
     }
 }

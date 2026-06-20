@@ -14,7 +14,7 @@ public record AwardCreateRequest(
 
         Long rankingId, // Có thể null nếu trao giải phụ không xét hạng
 
-        @NotBlank(message = "Loại giải thưởng không được để trống")
+        @NotNull(message = "Loại giải thưởng không được để trống")
         AwardType awardType, // VD: "FIRST_PLACE", "BEST_TECHNICAL"
 
         String description // VD: "Phần thưởng trị giá 10 triệu đồng"

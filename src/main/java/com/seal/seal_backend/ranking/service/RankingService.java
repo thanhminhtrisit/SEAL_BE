@@ -14,4 +14,5 @@ public interface RankingService {
      * Lấy danh sách kết quả xếp hạng
      */
     List<RankingResponse> getRankingsByRound(Long roundId);
+    void disqualifyTeam(Long teamId, String reason, Long userId);
 }

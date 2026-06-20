@@ -6,12 +6,15 @@ import com.seal.seal_backend.ranking.dto.response.RankingResponse;
 import com.seal.seal_backend.ranking.service.RankingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
+
 
 @Slf4j
 @Service
@@ -20,6 +23,8 @@ public class RankingServiceImpl implements RankingService {
 
     private final RankingRepository rankingRepository;
     private final RankingDataProvider dataProvider;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Override
     @Transactional
@@ -57,7 +62,7 @@ public class RankingServiceImpl implements RankingService {
             }
 
             preliminaryRankings.add(new RankingResponse(
-                    null, team.id(), team.name(), roundId,
+                    null, team.id(), team.name(), "Chung", roundId,
                     Math.round(finalScore * 1000.0) / 1000.0, 0, false));
         }
 
@@ -66,6 +71,13 @@ public class RankingServiceImpl implements RankingService {
         // 3. XÓA CŨ & LƯU MỚI (Dùng Setter và Proxy Object)
         log.info("Xóa bảng xếp hạng cũ của vòng thi: {}", roundId);
         rankingRepository.deleteByRoundId(roundId);
+
+        Map<Long, Long> teamCategoryMap = new HashMap<>();
+        for (RankingDataProvider.TeamView t : validTeams) {
+            if (t.categoryId() != null) {
+                teamCategoryMap.put(t.id(), t.categoryId());
+            }
+        }
 
         List<Ranking> entitiesToSave = new ArrayList<>();
         int currentRank = 1;
@@ -76,10 +88,14 @@ public class RankingServiceImpl implements RankingService {
             // Tạo các Dummy Object chỉ chứa ID để JPA tự map Foreign Key
             Event eventRef = new Event(); eventRef.setId(1L);
             Round roundRef = new Round(); roundRef.setId(roundId);
-            Category categoryRef = new Category(); categoryRef.setId(1L);
             Team teamRef = new Team(); teamRef.setId(r.teamId());
             User userRef = new User(); userRef.setId(userId);
-
+            Category categoryRef = null;
+            Long actualCategoryId = teamCategoryMap.get(r.teamId());
+            if (actualCategoryId != null) {
+                categoryRef = new Category();
+                categoryRef.setId(actualCategoryId);
+            }
             // Dùng Setter chuẩn của Entity
             Ranking entity = new Ranking();
             entity.setEvent(eventRef);
@@ -109,6 +125,7 @@ public class RankingServiceImpl implements RankingService {
                         e.getId(),
                         e.getTeam().getId(),
                         teamNameMap.getOrDefault(e.getTeam().getId(), "Unknown"),
+                        e.getCategory() != null ? e.getCategory().getName() : "Chung",
                         e.getRound().getId(),
                         e.getTotalScore().doubleValue(), // Đưa BigDecimal về lại Double cho DTO
                         e.getRankPosition(),
@@ -125,12 +142,33 @@ public class RankingServiceImpl implements RankingService {
                 .map(e -> new RankingResponse(
                         e.getId(),
                         e.getTeam().getId(),
-                        "Team-" + e.getTeam().getId(),
+                        e.getTeam().getName(), // Sửa dòng này: Lấy tên thật từ Entity
+                        e.getCategory() != null ? e.getCategory().getName() : "Chung",
                         e.getRound().getId(),
                         e.getTotalScore().doubleValue(),
                         e.getRankPosition(),
                         e.getIsPromoted()
                 ))
                 .collect(Collectors.toList());
+    }
+
+    // Hãy import thêm: import org.springframework.jdbc.core.JdbcTemplate;
+    // Và khai báo tiêm: private final JdbcTemplate jdbcTemplate; (nếu file chưa có)
+
+    @Override
+    @Transactional
+    public void disqualifyTeam(Long teamId, String reason, Long userId) {
+        log.info("Coordinator {} đang đình chỉ Team {} với lý do: {}", userId, teamId, reason);
+
+        // 1. Cập nhật trạng thái đội thành DISQUALIFIED
+        String updateSql = "UPDATE teams SET status = 'DISQUALIFIED' WHERE id = ?";
+        jdbcTemplate.update(updateSql, teamId);
+
+        // 2. (Tùy chọn) Ghi vào bảng Audit Log để đáp ứng FR-RNK-05
+        // String auditSql = "INSERT INTO audit_logs (action, target_id, user_id, reason, created_at) VALUES (?, ?, ?, ?, NOW())";
+        // jdbcTemplate.update(auditSql, "DISQUALIFY_TEAM", teamId, userId, reason);
+
+        // 3. Xóa các bản ghi xếp hạng hiện tại của đội này (nếu có)
+        // rankingRepository.deleteByTeamId(teamId);
     }
 }
