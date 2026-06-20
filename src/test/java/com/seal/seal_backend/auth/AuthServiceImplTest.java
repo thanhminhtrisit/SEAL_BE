@@ -3,9 +3,12 @@ package com.seal.seal_backend.auth;
 import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
+import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
 import com.seal.seal_backend.auth.security.JwtTokenProvider;
 import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.auth.service.impl.AuthServiceImpl;
+import com.seal.seal_backend.common.api.PageResponse;
+import com.seal.seal_backend.common.audit.AuditAction;
 import com.seal.seal_backend.common.audit.AuditPublisher;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
 import com.seal.seal_backend.domain.entity.Role;
@@ -20,8 +23,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
@@ -53,38 +61,24 @@ class AuthServiceImplTest {
     @Nested
     class Register {
 
-        @Test
-        void duplicateEmail_throws_BR_USR_01() {
-            when(userRepository.existsByEmail("dup@test.com")).thenReturn(true);
-
-            assertThatThrownBy(() -> authService.register(fptReq("dup@test.com", "Password1")))
-                    .isInstanceOf(BusinessRuleException.class)
-                    .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-01");
-        }
+        // ── email không tồn tại → tạo mới ────────────────────────────────
 
         @Test
-        void weakPassword_noUppercase_throws_BR_USR_05() {
-            when(userRepository.existsByEmail(any())).thenReturn(false);
-
-            // "password1" has digit but no uppercase
+        void newEmail_weakPassword_noUppercase_throws_BR_USR_05() {
             assertThatThrownBy(() -> authService.register(fptReq("a@b.com", "password1")))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-05");
         }
 
         @Test
-        void weakPassword_noDigit_throws_BR_USR_05() {
-            when(userRepository.existsByEmail(any())).thenReturn(false);
-
-            // "Password!" has uppercase but no digit
+        void newEmail_weakPassword_noDigit_throws_BR_USR_05() {
             assertThatThrownBy(() -> authService.register(fptReq("a@b.com", "Password!")))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-05");
         }
 
         @Test
-        void fptStudent_missingStudentId_throws_BR_USR_03() {
-            when(userRepository.existsByEmail(any())).thenReturn(false);
+        void newEmail_fptStudent_missingStudentId_throws_BR_USR_03() {
             RegisterRequest req = new RegisterRequest(
                     "a@b.com", "Password1", "Name", null, true, null, null);
 
@@ -94,8 +88,7 @@ class AuthServiceImplTest {
         }
 
         @Test
-        void externalStudent_missingStudentId_throws_BR_USR_03() {
-            when(userRepository.existsByEmail(any())).thenReturn(false);
+        void newEmail_externalStudent_missingStudentId_throws_BR_USR_03() {
             RegisterRequest req = new RegisterRequest(
                     "a@b.com", "Password1", "Name", null, false, null, "Some Uni");
 
@@ -105,8 +98,7 @@ class AuthServiceImplTest {
         }
 
         @Test
-        void externalStudent_missingUniversity_throws_BR_USR_03() {
-            when(userRepository.existsByEmail(any())).thenReturn(false);
+        void newEmail_externalStudent_missingUniversity_throws_BR_USR_03() {
             RegisterRequest req = new RegisterRequest(
                     "a@b.com", "Password1", "Name", null, false, "EXT001", null);
 
@@ -116,8 +108,8 @@ class AuthServiceImplTest {
         }
 
         @Test
-        void fptStudent_validRequest_savesAsPending_andReturnsId() {
-            when(userRepository.existsByEmail(any())).thenReturn(false);
+        void newEmail_fptStudent_validRequest_savesAsPending_andReturnsId() {
+            when(userRepository.findByEmail(any())).thenReturn(Optional.empty());
             when(roleRepository.findByCode("TEAM_MEMBER")).thenReturn(Optional.of(teamMemberRole));
             when(passwordEncoder.encode(any())).thenReturn("$2a$10$hashed");
             User saved = savedUser(42L, UserStatus.PENDING);
@@ -131,8 +123,8 @@ class AuthServiceImplTest {
         }
 
         @Test
-        void externalStudent_validRequest_savesAsPending() {
-            when(userRepository.existsByEmail(any())).thenReturn(false);
+        void newEmail_externalStudent_validRequest_savesAsPending() {
+            when(userRepository.findByEmail(any())).thenReturn(Optional.empty());
             when(roleRepository.findByCode("TEAM_MEMBER")).thenReturn(Optional.of(teamMemberRole));
             when(passwordEncoder.encode(any())).thenReturn("$2a$10$hashed");
             when(userRepository.save(any())).thenReturn(savedUser(99L, UserStatus.PENDING));
@@ -142,6 +134,78 @@ class AuthServiceImplTest {
             Long id = authService.register(req);
 
             assertThat(id).isEqualTo(99L);
+        }
+
+        // ── email REJECTED → reactivate ───────────────────────────────────
+
+        @Test
+        void rejectedEmail_validRequest_reactivatesUser_returnsSameId() {
+            User rejected = userWithStatus("rej@x.com", UserStatus.REJECTED);
+            rejected.setId(77L);
+            when(userRepository.findByEmail("rej@x.com")).thenReturn(Optional.of(rejected));
+            when(passwordEncoder.encode(any())).thenReturn("$2a$new$hash");
+            when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            Long id = authService.register(fptReq("rej@x.com", "Password1"));
+
+            assertThat(id).isEqualTo(77L);
+            assertThat(rejected.getStatus()).isEqualTo(UserStatus.PENDING);
+            assertThat(rejected.getApprovedBy()).isNull();
+            assertThat(rejected.getApprovedAt()).isNull();
+            assertThat(rejected.getPasswordHash()).isEqualTo("$2a$new$hash");
+            verify(auditPublisher).log(eq(rejected),
+                    eq(AuditAction.ACCOUNT_REACTIVATED), eq("USER"), eq(77L),
+                    any(), any(), isNull(), isNull());
+        }
+
+        @Test
+        void rejectedEmail_weakPassword_throws_BR_USR_05() {
+            // validation fires BEFORE checking DB — findByEmail not called
+            assertThatThrownBy(() -> authService.register(fptReq("rej@x.com", "nodigit")))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-05");
+        }
+
+        @Test
+        void rejectedEmail_missingStudentId_throws_BR_USR_03() {
+            RegisterRequest req = new RegisterRequest(
+                    "rej@x.com", "Password1", "Name", null, true, null, null);
+
+            assertThatThrownBy(() -> authService.register(req))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-03");
+        }
+
+        // ── email PENDING / ACTIVE → 409 BR-USR-01 ───────────────────────
+
+        @Test
+        void pendingEmail_throws_BR_USR_01() {
+            User pending = userWithStatus("dup@x.com", UserStatus.PENDING);
+            when(userRepository.findByEmail("dup@x.com")).thenReturn(Optional.of(pending));
+
+            assertThatThrownBy(() -> authService.register(fptReq("dup@x.com", "Password1")))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-01");
+        }
+
+        @Test
+        void activeEmail_throws_BR_USR_01() {
+            User active = userWithStatus("dup@x.com", UserStatus.ACTIVE);
+            when(userRepository.findByEmail("dup@x.com")).thenReturn(Optional.of(active));
+
+            assertThatThrownBy(() -> authService.register(fptReq("dup@x.com", "Password1")))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-01");
+        }
+
+        @Test
+        void lockedEmail_throws_BR_USR_01() {
+            User locked = userWithStatus("dup@x.com", UserStatus.LOCKED);
+            when(userRepository.findByEmail("dup@x.com")).thenReturn(Optional.of(locked));
+
+            assertThatThrownBy(() -> authService.register(fptReq("dup@x.com", "Password1")))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-01");
         }
     }
 
@@ -217,6 +281,105 @@ class AuthServiceImplTest {
             assertThat(resp.accessToken()).isEqualTo("access-tok");
             assertThat(resp.refreshToken()).isEqualTo("refresh-tok");
             verify(userRepository).save(argThat(u -> u.getLastLoginAt() != null));
+        }
+    }
+
+    // ─────────────────────── ACCOUNT APPROVAL ────────────────────────────
+
+    @Nested
+    class AccountApproval {
+
+        @Test
+        void approvePendingUser_setsActiveAndAuditsAccountApproved() {
+            User target = userWithStatus("target@x.com", UserStatus.PENDING);
+            target.setId(10L);
+            User approver = userWithStatus("coord@x.com", UserStatus.ACTIVE);
+            approver.setId(99L);
+
+            when(userRepository.findById(10L)).thenReturn(Optional.of(target));
+            when(userRepository.findById(99L)).thenReturn(Optional.of(approver));
+            when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            authService.approveAccount(10L, 99L);
+
+            assertThat(target.getStatus()).isEqualTo(UserStatus.ACTIVE);
+            assertThat(target.getApprovedBy()).isEqualTo(approver);
+            assertThat(target.getApprovedAt()).isNotNull();
+            verify(auditPublisher).log(eq(approver), eq(AuditAction.ACCOUNT_APPROVED),
+                    eq("USER"), eq(10L), any(), any(), isNull(), isNull());
+        }
+
+        @Test
+        void selfApprove_throws_BR_GOV_02() {
+            User self = userWithStatus("coord@x.com", UserStatus.PENDING);
+            self.setId(5L);
+            when(userRepository.findById(5L)).thenReturn(Optional.of(self));
+
+            assertThatThrownBy(() -> authService.approveAccount(5L, 5L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-GOV-02");
+        }
+
+        @Test
+        void approveNonPendingUser_throws_BR_AUTH_06() {
+            User target = userWithStatus("active@x.com", UserStatus.ACTIVE);
+            target.setId(20L);
+            User approver = userWithStatus("coord@x.com", UserStatus.ACTIVE);
+            approver.setId(99L);
+            when(userRepository.findById(20L)).thenReturn(Optional.of(target));
+            when(userRepository.findById(99L)).thenReturn(Optional.of(approver));
+
+            assertThatThrownBy(() -> authService.approveAccount(20L, 99L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-AUTH-06");
+        }
+
+        @Test
+        void rejectPendingUser_setsRejectedAndAuditsAccountRejected() {
+            User target = userWithStatus("target@x.com", UserStatus.PENDING);
+            target.setId(30L);
+            User approver = userWithStatus("coord@x.com", UserStatus.ACTIVE);
+            approver.setId(99L);
+
+            when(userRepository.findById(30L)).thenReturn(Optional.of(target));
+            when(userRepository.findById(99L)).thenReturn(Optional.of(approver));
+            when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            authService.rejectAccount(30L, 99L, "Incomplete information");
+
+            assertThat(target.getStatus()).isEqualTo(UserStatus.REJECTED);
+            verify(auditPublisher).log(eq(approver), eq(AuditAction.ACCOUNT_REJECTED),
+                    eq("USER"), eq(30L), any(), any(), eq("Incomplete information"), isNull());
+        }
+
+        @Test
+        void rejectNonPendingUser_throws_BR_AUTH_07() {
+            User target = userWithStatus("active@x.com", UserStatus.ACTIVE);
+            target.setId(40L);
+            User approver = userWithStatus("coord@x.com", UserStatus.ACTIVE);
+            approver.setId(99L);
+            when(userRepository.findById(40L)).thenReturn(Optional.of(target));
+            when(userRepository.findById(99L)).thenReturn(Optional.of(approver));
+
+            assertThatThrownBy(() -> authService.rejectAccount(40L, 99L, "some reason"))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-AUTH-07");
+        }
+
+        @Test
+        void listPendingAccounts_returnsMappedPage() {
+            User pending = userWithStatus("p@x.com", UserStatus.PENDING);
+            pending.setId(55L);
+            Page<User> page = new PageImpl<>(List.of(pending), PageRequest.of(0, 20), 1);
+            when(userRepository.findAllByStatus(eq(UserStatus.PENDING), any(Pageable.class)))
+                    .thenReturn(page);
+
+            PageResponse<PendingAccountResponse> result =
+                    authService.listPendingAccounts(PageRequest.of(0, 20));
+
+            assertThat(result.content()).hasSize(1);
+            assertThat(result.content().get(0).id()).isEqualTo(55L);
+            assertThat(result.totalElements()).isEqualTo(1);
         }
     }
 

@@ -3,9 +3,11 @@ package com.seal.seal_backend.auth.service.impl;
 import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
+import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
 import com.seal.seal_backend.auth.security.JwtTokenProvider;
 import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.auth.service.AuthService;
+import com.seal.seal_backend.common.api.PageResponse;
 import com.seal.seal_backend.common.audit.AuditAction;
 import com.seal.seal_backend.common.audit.AuditPublisher;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
@@ -17,6 +19,7 @@ import com.seal.seal_backend.domain.enums.UserStatus;
 import com.seal.seal_backend.domain.repository.RoleRepository;
 import com.seal.seal_backend.domain.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,32 +43,37 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public Long register(RegisterRequest req) {
-        // email must be unique
-        if (userRepository.existsByEmail(req.email())) {
-            throw new BusinessRuleException("BR-USR-01", "Email is already registered: " + req.email());
-        }
+        validatePasswordStrength(req.password());
+        validateStudentFields(req);
 
-        // password strength (format check beyond @Size)
-        if (!PASSWORD_PATTERN.matcher(req.password()).matches()) {
-            throw new BusinessRuleException("BR-USR-05",
-                    "Password must be at least 8 characters and contain at least 1 uppercase letter and 1 digit.");
-        }
+        return userRepository.findByEmail(req.email())
+                .map(existing -> reactivateRejected(existing, req))
+                .orElseGet(() -> createNew(req));
+    }
 
-        // required fields by student type
-        if (req.fptStudent()) {
-            if (!hasText(req.studentId())) {
-                throw new BusinessRuleException("BR-USR-03", "FPT students must provide a student ID.");
-            }
-        } else {
-            if (!hasText(req.studentId())) {
-                throw new BusinessRuleException("BR-USR-03", "External participants must provide a student ID.");
-            }
-            if (!hasText(req.university())) {
-                throw new BusinessRuleException("BR-USR-03", "External participants must provide a university name.");
-            }
+    private Long reactivateRejected(User existing, RegisterRequest req) {
+        if (existing.getStatus() != UserStatus.REJECTED) {
+            throw new BusinessRuleException("BR-USR-01",
+                    "Email is already registered: " + req.email());
         }
+        String oldJson = "{\"status\":\"REJECTED\"}";
+        existing.setFullName(req.fullName());
+        existing.setPhone(req.phone());
+        existing.setStudentId(req.studentId());
+        existing.setUniversity(req.university());
+        existing.setIsFptStudent(req.fptStudent());
+        existing.setPasswordHash(passwordEncoder.encode(req.password()));
+        existing.setStatus(UserStatus.PENDING);
+        existing.setApprovedBy(null);
+        existing.setApprovedAt(null);
+        userRepository.save(existing);
 
-        // participant accounts start with role TEAM_MEMBER and status PENDING
+        auditPublisher.log(existing, AuditAction.ACCOUNT_REACTIVATED, "USER", existing.getId(),
+                oldJson, "{\"status\":\"PENDING\"}", null, null);
+        return existing.getId();
+    }
+
+    private Long createNew(RegisterRequest req) {
         Role teamMemberRole = roleRepository.findByCode("TEAM_MEMBER")
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "System role TEAM_MEMBER not found — ensure db/schema.sql seed data is loaded."));
@@ -181,6 +189,36 @@ public class AuthServiceImpl implements AuthService {
 
         auditPublisher.log(approver, AuditAction.ACCOUNT_REJECTED, "USER", userId,
                 oldJson, "{\"status\":\"REJECTED\"}", reason, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<PendingAccountResponse> listPendingAccounts(Pageable pageable) {
+        return PageResponse.of(
+                userRepository.findAllByStatus(UserStatus.PENDING, pageable)
+                        .map(PendingAccountResponse::from));
+    }
+
+    private void validatePasswordStrength(String password) {
+        if (!PASSWORD_PATTERN.matcher(password).matches()) {
+            throw new BusinessRuleException("BR-USR-05",
+                    "Password must be at least 8 characters and contain at least 1 uppercase letter and 1 digit.");
+        }
+    }
+
+    private void validateStudentFields(RegisterRequest req) {
+        if (req.fptStudent()) {
+            if (!hasText(req.studentId())) {
+                throw new BusinessRuleException("BR-USR-03", "FPT students must provide a student ID.");
+            }
+        } else {
+            if (!hasText(req.studentId())) {
+                throw new BusinessRuleException("BR-USR-03", "External participants must provide a student ID.");
+            }
+            if (!hasText(req.university())) {
+                throw new BusinessRuleException("BR-USR-03", "External participants must provide a university name.");
+            }
+        }
     }
 
     private boolean hasText(String s) {
