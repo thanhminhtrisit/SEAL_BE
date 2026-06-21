@@ -116,18 +116,28 @@ public class RankingServiceImpl implements RankingService {
 
         List<Ranking> savedEntities = rankingRepository.saveAll(entitiesToSave);
 
-        // 4. MAP NGƯỢC RA DTO (Phải gọi e.getTeam().getId() thay vì e.getTeamId())
+        // 4. MAP NGƯỢC RA DTO
         Map<Long, String> teamNameMap = validTeams.stream()
                 .collect(Collectors.toMap(RankingDataProvider.TeamView::id, RankingDataProvider.TeamView::name));
+
+        // ---> THÊM MỚI: Tạo thêm 1 Map để lưu tên Category của từng Team
+        Map<Long, String> teamCategoryNameMap = validTeams.stream()
+                .collect(Collectors.toMap(
+                        RankingDataProvider.TeamView::id,
+                        t -> t.categoryName() != null ? t.categoryName() : "Chung"
+                ));
 
         return savedEntities.stream()
                 .map(e -> new RankingResponse(
                         e.getId(),
                         e.getTeam().getId(),
                         teamNameMap.getOrDefault(e.getTeam().getId(), "Unknown"),
-                        e.getCategory() != null ? e.getCategory().getName() : "Chung",
+
+                        // ---> SỬA Ở ĐÂY: Lấy tên Category từ Map, thay vì gọi e.getCategory().getName()
+                        teamCategoryNameMap.getOrDefault(e.getTeam().getId(), "Chung"),
+
                         e.getRound().getId(),
-                        e.getTotalScore().doubleValue(), // Đưa BigDecimal về lại Double cho DTO
+                        e.getTotalScore().doubleValue(),
                         e.getRankPosition(),
                         e.getIsPromoted()
                 ))
