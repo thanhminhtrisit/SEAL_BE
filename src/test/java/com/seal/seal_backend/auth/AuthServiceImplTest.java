@@ -1,8 +1,10 @@
 package com.seal.seal_backend.auth;
 
+import com.seal.seal_backend.auth.dto.request.CreateGuestJudgeRequest;
 import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
+import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
 import com.seal.seal_backend.auth.security.JwtTokenProvider;
 import com.seal.seal_backend.auth.security.UserPrincipal;
@@ -13,6 +15,7 @@ import com.seal.seal_backend.common.audit.AuditPublisher;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
 import com.seal.seal_backend.domain.entity.Role;
 import com.seal.seal_backend.domain.entity.User;
+import com.seal.seal_backend.domain.enums.AccountType;
 import com.seal.seal_backend.domain.enums.UserStatus;
 import com.seal.seal_backend.domain.repository.RoleRepository;
 import com.seal.seal_backend.domain.repository.UserRepository;
@@ -380,6 +383,86 @@ class AuthServiceImplTest {
             assertThat(result.content()).hasSize(1);
             assertThat(result.content().get(0).id()).isEqualTo(55L);
             assertThat(result.totalElements()).isEqualTo(1);
+        }
+    }
+
+    // ─────────────────────── CREATE GUEST JUDGE ──────────────────────────
+
+    @Nested
+    class CreateGuestJudge {
+
+        private Role judgeRole;
+
+        @BeforeEach
+        void setup() {
+            judgeRole = new Role();
+            judgeRole.setId(4L);
+            judgeRole.setCode("JUDGE");
+        }
+
+        @Test
+        void createGuestJudge_createsActiveGuestJudge() {
+            when(userRepository.findByEmail("judge@ext.com")).thenReturn(Optional.empty());
+            when(roleRepository.findByCode("JUDGE")).thenReturn(Optional.of(judgeRole));
+            User creator = userWithStatus("coord@x.com", UserStatus.ACTIVE);
+            creator.setId(1L);
+            when(userRepository.findById(1L)).thenReturn(Optional.of(creator));
+            when(passwordEncoder.encode(any())).thenReturn("$2a$hashed");
+            User saved = new User();
+            saved.setId(50L);
+            saved.setEmail("judge@ext.com");
+            saved.setFullName("Guest Judge");
+            saved.setAccountType(AccountType.GUEST_JUDGE);
+            saved.setPrimaryRole(judgeRole);
+            saved.setStatus(UserStatus.ACTIVE);
+            when(userRepository.save(any())).thenReturn(saved);
+
+            GuestJudgeResponse resp = authService.createGuestJudge(
+                    new CreateGuestJudgeRequest("judge@ext.com", "Guest Judge", null), 1L);
+
+            assertThat(resp.userId()).isEqualTo(50L);
+            assertThat(resp.email()).isEqualTo("judge@ext.com");
+            assertThat(resp.temporaryPassword()).isNotBlank();
+            verify(userRepository).save(argThat(u ->
+                    u.getStatus() == UserStatus.ACTIVE
+                    && u.getAccountType() == AccountType.GUEST_JUDGE
+                    && u.getPrimaryRole() == judgeRole));
+            verify(auditPublisher).log(eq(creator), eq(AuditAction.STAFF_ACCOUNT_CREATED),
+                    eq("USER"), eq(50L), isNull(), any(), isNull(), isNull());
+        }
+
+        @Test
+        void createGuestJudge_passwordMeetsStrengthRequirement() {
+            when(userRepository.findByEmail(any())).thenReturn(Optional.empty());
+            when(roleRepository.findByCode("JUDGE")).thenReturn(Optional.of(judgeRole));
+            User creator = userWithStatus("coord@x.com", UserStatus.ACTIVE);
+            creator.setId(1L);
+            when(userRepository.findById(1L)).thenReturn(Optional.of(creator));
+            when(passwordEncoder.encode(any())).thenAnswer(inv -> "hashed:" + inv.getArgument(0));
+            User saved = new User();
+            saved.setId(51L);
+            saved.setEmail("j2@ext.com");
+            saved.setFullName("J2");
+            when(userRepository.save(any())).thenReturn(saved);
+
+            GuestJudgeResponse resp = authService.createGuestJudge(
+                    new CreateGuestJudgeRequest("j2@ext.com", "J2", null), 1L);
+
+            String tempPwd = resp.temporaryPassword();
+            assertThat(tempPwd).hasSizeGreaterThanOrEqualTo(8);
+            assertThat(tempPwd).matches(".*[A-Z].*");
+            assertThat(tempPwd).matches(".*\\d.*");
+        }
+
+        @Test
+        void createGuestJudge_duplicateEmail_throws_BR_USR_01() {
+            User existing = userWithStatus("taken@ext.com", UserStatus.ACTIVE);
+            when(userRepository.findByEmail("taken@ext.com")).thenReturn(Optional.of(existing));
+
+            assertThatThrownBy(() -> authService.createGuestJudge(
+                    new CreateGuestJudgeRequest("taken@ext.com", "Name", null), 1L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-01");
         }
     }
 

@@ -1,19 +1,26 @@
 package com.seal.seal_backend.event.service.impl;
 
+import com.seal.seal_backend.common.audit.AuditAction;
+import com.seal.seal_backend.common.audit.AuditPublisher;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
+import com.seal.seal_backend.common.exception.ForbiddenActionException;
 import com.seal.seal_backend.common.exception.ResourceNotFoundException;
 import com.seal.seal_backend.domain.entity.*;
+import com.seal.seal_backend.domain.enums.AssignmentStatus;
 import com.seal.seal_backend.domain.enums.EventStatus;
+import com.seal.seal_backend.domain.enums.EventType;
 import com.seal.seal_backend.domain.enums.RoundStatus;
 import com.seal.seal_backend.domain.repository.*;
 import com.seal.seal_backend.event.dto.request.*;
 import com.seal.seal_backend.event.dto.response.*;
 import com.seal.seal_backend.event.service.EventService;
+import com.seal.seal_backend.shared.contract.JudgeQueryPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -28,6 +35,10 @@ public class EventServiceImpl implements EventService {
     private final TermPlanRepository termPlanRepository;
     private final UserRepository userRepository;
     private final CategoryRepository categoryRepository;
+    private final JudgeAssignmentRepository judgeAssignmentRepository;
+    private final EventBudgetRepository eventBudgetRepository;
+    private final AuditPublisher auditPublisher;
+    private final JudgeQueryPort judgeQueryPort;
 
     // ─── Event ────────────────────────────────────────────────────────────────
 
@@ -44,6 +55,21 @@ public class EventServiceImpl implements EventService {
                 .orElseThrow(() -> new ResourceNotFoundException("Discipline not found: " + req.disciplineId()));
         TermPlan termPlan = termPlanRepository.findById(req.termPlanId())
                 .orElseThrow(() -> new ResourceNotFoundException("TermPlan not found: " + req.termPlanId()));
+
+        // Discipline must match term plan's discipline
+        if (!discipline.getId().equals(termPlan.getDiscipline().getId())) {
+            throw new BusinessRuleException("BR-EVT-05",
+                    "Event discipline does not match the term plan's discipline.");
+        }
+
+        // Event type must match term plan's term (SPECIAL events are exempt)
+        if (req.eventType() != EventType.SPECIAL
+                && !req.eventType().name().equals(termPlan.getTerm().name())) {
+            throw new BusinessRuleException("BR-EVT-05",
+                    "Event type " + req.eventType()
+                    + " does not match term plan term " + termPlan.getTerm() + ".");
+        }
+
         User creator = userRepository.findById(creatorId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + creatorId));
 
@@ -82,6 +108,7 @@ public class EventServiceImpl implements EventService {
     @Transactional
     public EventResponse update(Long id, UpdateEventRequest req) {
         Event event = findEvent(id);
+        validateNotPending(event);
 
         if (req.name() != null && !req.name().isBlank()) event.setName(req.name());
         if (req.description() != null) event.setDescription(req.description());
@@ -97,12 +124,86 @@ public class EventServiceImpl implements EventService {
         return EventResponse.from(eventRepository.save(event));
     }
 
+    // ─── Submit (FR-EVT-07) ───────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public EventResponse submitEvent(Long eventId, Long coordinatorId) {
+        Event event = findEvent(eventId);
+
+        if (!event.getOwnerCoordinator().getId().equals(coordinatorId)) {
+            throw new ForbiddenActionException("Only the owner coordinator can submit this event.");
+        }
+
+        if (event.getStatus() != EventStatus.DRAFT && event.getStatus() != EventStatus.REJECTED) {
+            throw new BusinessRuleException("BR-EVT-06S",
+                    "Only DRAFT or REJECTED events can be submitted. Current status: " + event.getStatus());
+        }
+
+        // BR-EVT-08: must have at least one round
+        List<Round> rounds = roundRepository.findByEventIdOrderByOrderNumber(eventId);
+        if (rounds.isEmpty()) {
+            throw new BusinessRuleException("BR-EVT-08",
+                    "Event must have at least one round before submission.");
+        }
+
+        for (Round round : rounds) {
+            // BR-EVT-03: each round must have a criteria set with weights summing to 100
+            CriteriaSet cs = criteriaSetRepository.findFirstByRoundId(round.getId())
+                    .or(() -> criteriaSetRepository.findFirstByEventIdAndRoundIsNull(eventId))
+                    .orElseThrow(() -> new BusinessRuleException("BR-EVT-03",
+                            "Round '" + round.getName() + "' has no criteria set."));
+
+            BigDecimal totalWeight = scoringCriterionRepository
+                    .findByCriteriaSetIdOrderByDisplayOrder(cs.getId())
+                    .stream()
+                    .map(ScoringCriterion::getWeight)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            if (totalWeight.compareTo(new BigDecimal("100")) != 0) {
+                throw new BusinessRuleException("BR-EVT-03",
+                        "Criteria weights for round '" + round.getName()
+                        + "' must sum to 100 (got " + totalWeight + ").");
+            }
+
+            // BR-EVT-06: each round must have at least one judge
+            if (judgeQueryPort.judgeIdsForRound(round.getId()).isEmpty()) {
+                throw new BusinessRuleException("BR-EVT-06",
+                        "Round '" + round.getName() + "' has no assigned judges.");
+            }
+        }
+
+        // FR-EVT-08: event must have a budget
+        if (eventBudgetRepository.findByEventId(eventId).isEmpty()) {
+            throw new BusinessRuleException("BR-EVT-09",
+                    "Event must have a budget before submission.");
+        }
+
+        // Must have at least one category
+        if (categoryRepository.findByEventIdOrderByCreatedAtAsc(eventId).isEmpty()) {
+            throw new BusinessRuleException("BR-EVT-10",
+                    "Event must have at least one category before submission.");
+        }
+
+        String oldStatus = event.getStatus().name();
+        event.setStatus(EventStatus.PENDING_APPROVAL);
+        event.setSubmittedAt(LocalDateTime.now());
+        Event saved = eventRepository.save(event);
+
+        User coordinator = userRepository.findById(coordinatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + coordinatorId));
+        auditPublisher.log(coordinator, AuditAction.EVENT_SUBMITTED, "EVENT", eventId,
+                "{\"status\":\"" + oldStatus + "\"}", "{\"status\":\"PENDING_APPROVAL\"}", null, null);
+
+        return EventResponse.from(saved);
+    }
+
     // ─── Round ────────────────────────────────────────────────────────────────
 
     @Override
     @Transactional
     public RoundResponse addRound(Long eventId, CreateRoundRequest req) {
         Event event = findEvent(eventId);
+        validateNotPending(event);
 
         if (roundRepository.existsByEventIdAndOrderNumber(eventId, req.orderNumber())) {
             throw new BusinessRuleException("BR-EVT-02",
@@ -140,7 +241,8 @@ public class EventServiceImpl implements EventService {
     @Override
     @Transactional
     public RoundResponse updateRound(Long eventId, Long roundId, UpdateRoundRequest req) {
-        findEvent(eventId);
+        Event event = findEvent(eventId);
+        validateNotPending(event);
         Round round = findRound(roundId, eventId);
 
         if (req.name() != null && !req.name().isBlank()) round.setName(req.name());
@@ -157,6 +259,7 @@ public class EventServiceImpl implements EventService {
     @Transactional
     public CriteriaSetResponse addCriteriaSet(Long eventId, CreateCriteriaSetRequest req, Long creatorId) {
         Event event = findEvent(eventId);
+        validateNotPending(event);
         User creator = userRepository.findById(creatorId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + creatorId));
 
@@ -231,6 +334,7 @@ public class EventServiceImpl implements EventService {
     @Transactional
     public CategoryResponse addCategory(Long eventId, CreateCategoryRequest req) {
         Event event = findEvent(eventId);
+        validateNotPending(event);
 
         if (categoryRepository.existsByEventIdAndName(eventId, req.name())) {
             throw new BusinessRuleException("BR-EVT-04",
@@ -271,7 +375,8 @@ public class EventServiceImpl implements EventService {
     @Override
     @Transactional
     public CategoryResponse updateCategory(Long eventId, Long categoryId, UpdateCategoryRequest req) {
-        findEvent(eventId);
+        Event event = findEvent(eventId);
+        validateNotPending(event);
         Category cat = findCategory(categoryId, eventId);
 
         if (req.name() != null && !req.name().isBlank() && !req.name().equals(cat.getName())) {
@@ -292,7 +397,160 @@ public class EventServiceImpl implements EventService {
         return CategoryResponse.from(categoryRepository.save(cat));
     }
 
+    // ─── Judge Assignment ─────────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public JudgeAssignmentResponse assignJudge(Long eventId, Long roundId,
+                                               AssignJudgeRequest req, Long assignedById) {
+        findEvent(eventId);
+        Round round = findRound(roundId, eventId);
+
+        User judge = userRepository.findById(req.judgeId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + req.judgeId()));
+
+        if (judge.getPrimaryRole() == null || !"JUDGE".equals(judge.getPrimaryRole().getCode())) {
+            throw new BusinessRuleException("BR-JDG-01",
+                    "User " + req.judgeId() + " does not have the JUDGE role.");
+        }
+
+        if (judgeAssignmentRepository.existsByJudgeIdAndRoundIdAndStatus(
+                req.judgeId(), roundId, AssignmentStatus.ACTIVE)) {
+            throw new BusinessRuleException("BR-JDG-02",
+                    "Judge " + req.judgeId() + " is already assigned to round " + roundId + ".");
+        }
+
+        User assignedBy = userRepository.findById(assignedById)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + assignedById));
+
+        Category category = null;
+        if (req.categoryId() != null) {
+            category = findCategory(req.categoryId(), eventId);
+        }
+
+        JudgeAssignment ja = new JudgeAssignment();
+        ja.setJudge(judge);
+        ja.setEvent(round.getEvent());
+        ja.setRound(round);
+        ja.setCategory(category);
+        ja.setAssignedBy(assignedBy);
+        ja.setStatus(AssignmentStatus.ACTIVE);
+
+        return JudgeAssignmentResponse.from(judgeAssignmentRepository.save(ja));
+    }
+
+    @Override
+    @Transactional
+    public void revokeJudge(Long eventId, Long roundId, Long assignmentId) {
+        findEvent(eventId);
+        findRound(roundId, eventId);
+
+        JudgeAssignment ja = judgeAssignmentRepository.findById(assignmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("JudgeAssignment not found: " + assignmentId));
+
+        if (!ja.getRound().getId().equals(roundId)) {
+            throw new ForbiddenActionException(
+                    "Assignment " + assignmentId + " does not belong to round " + roundId);
+        }
+
+        ja.setStatus(AssignmentStatus.REVOKED);
+        judgeAssignmentRepository.save(ja);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<JudgeAssignmentResponse> listJudgeAssignments(Long eventId, Long roundId) {
+        findEvent(eventId);
+        findRound(roundId, eventId);
+        return judgeAssignmentRepository.findByRoundIdAndStatus(roundId, AssignmentStatus.ACTIVE)
+                .stream().map(JudgeAssignmentResponse::from).toList();
+    }
+
+    // ─── Lifecycle (FR-EVT-07): post-APPROVED transitions ────────────────────
+
+    @Override
+    @Transactional
+    public EventResponse openEvent(Long eventId, Long coordinatorId) {
+        return transitionStatus(eventId, coordinatorId,
+                EventStatus.APPROVED, EventStatus.OPEN, AuditAction.EVENT_OPENED);
+    }
+
+    @Override
+    @Transactional
+    public EventResponse startEvent(Long eventId, Long coordinatorId) {
+        return transitionStatus(eventId, coordinatorId,
+                EventStatus.OPEN, EventStatus.IN_PROGRESS, AuditAction.EVENT_STARTED);
+    }
+
+    @Override
+    @Transactional
+    public EventResponse completeEvent(Long eventId, Long coordinatorId) {
+        return transitionStatus(eventId, coordinatorId,
+                EventStatus.IN_PROGRESS, EventStatus.COMPLETED, AuditAction.EVENT_COMPLETED);
+    }
+
+    @Override
+    @Transactional
+    public EventResponse archiveEvent(Long eventId, Long coordinatorId) {
+        Event event = findEvent(eventId);
+
+        if (!event.getOwnerCoordinator().getId().equals(coordinatorId)) {
+            throw new ForbiddenActionException("Only the owner coordinator can archive this event.");
+        }
+        if (event.getStatus() != EventStatus.COMPLETED) {
+            throw new BusinessRuleException("BR-EVT-11",
+                    "Cannot archive event: expected COMPLETED but was " + event.getStatus() + ".");
+        }
+
+        String oldStatus = event.getStatus().name();
+        event.setStatus(EventStatus.ARCHIVED);
+        event.setArchivedAt(LocalDateTime.now());
+        Event saved = eventRepository.save(event);
+
+        User coordinator = userRepository.findById(coordinatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + coordinatorId));
+        auditPublisher.log(coordinator, AuditAction.EVENT_ARCHIVED, "EVENT", eventId,
+                "{\"status\":\"" + oldStatus + "\"}", "{\"status\":\"ARCHIVED\"}", null, null);
+
+        return EventResponse.from(saved);
+    }
+
+    /** Shared transition helper for OPEN / START / COMPLETE. */
+    private EventResponse transitionStatus(Long eventId, Long coordinatorId,
+                                           EventStatus expectedFrom, EventStatus to,
+                                           AuditAction auditAction) {
+        Event event = findEvent(eventId);
+
+        if (!event.getOwnerCoordinator().getId().equals(coordinatorId)) {
+            throw new ForbiddenActionException(
+                    "Only the owner coordinator can change this event's status.");
+        }
+        if (event.getStatus() != expectedFrom) {
+            throw new BusinessRuleException("BR-EVT-11",
+                    "Cannot transition to " + to + ": expected " + expectedFrom
+                    + " but event is " + event.getStatus() + ".");
+        }
+
+        String oldStatus = event.getStatus().name();
+        event.setStatus(to);
+        Event saved = eventRepository.save(event);
+
+        User coordinator = userRepository.findById(coordinatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + coordinatorId));
+        auditPublisher.log(coordinator, auditAction, "EVENT", eventId,
+                "{\"status\":\"" + oldStatus + "\"}", "{\"status\":\"" + to + "\"}", null, null);
+
+        return EventResponse.from(saved);
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private void validateNotPending(Event event) {
+        if (event.getStatus() == EventStatus.PENDING_APPROVAL) {
+            throw new BusinessRuleException("BR-EVT-07",
+                    "Event " + event.getId() + " is locked for editing while pending approval.");
+        }
+    }
 
     private Event findEvent(Long id) {
         return eventRepository.findById(id)
@@ -320,7 +578,6 @@ public class EventServiceImpl implements EventService {
     private String uniqueSlug(String name) {
         String base = name.toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
         if (!eventRepository.existsBySlug(base)) return base;
-        String candidate = base + "-" + System.currentTimeMillis();
-        return candidate;
+        return base + "-" + System.currentTimeMillis();
     }
 }

@@ -28,4 +28,18 @@ public interface EventService {
     List<CategoryResponse> listCategories(Long eventId);
     CategoryResponse getCategory(Long eventId, Long categoryId);
     CategoryResponse updateCategory(Long eventId, Long categoryId, UpdateCategoryRequest req);
+
+    // --- Judge Assignment ---
+    JudgeAssignmentResponse assignJudge(Long eventId, Long roundId, AssignJudgeRequest req, Long assignedById);
+    void revokeJudge(Long eventId, Long roundId, Long assignmentId);
+    List<JudgeAssignmentResponse> listJudgeAssignments(Long eventId, Long roundId);
+
+    // --- Submit (FR-EVT-07) ---
+    EventResponse submitEvent(Long eventId, Long coordinatorId);
+
+    // --- Lifecycle (FR-EVT-07): APPROVED → OPEN → IN_PROGRESS → COMPLETED → ARCHIVED ---
+    EventResponse openEvent(Long eventId, Long coordinatorId);
+    EventResponse startEvent(Long eventId, Long coordinatorId);
+    EventResponse completeEvent(Long eventId, Long coordinatorId);
+    EventResponse archiveEvent(Long eventId, Long coordinatorId);
 }
