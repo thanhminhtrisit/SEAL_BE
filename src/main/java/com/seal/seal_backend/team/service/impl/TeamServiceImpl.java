@@ -149,10 +149,28 @@ public class TeamServiceImpl implements TeamService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<InvitationResponse> listInvitations(Long teamId) {
+    public List<InvitationResponse> listInvitations(Long teamId, Long requesterId, String requesterRoleCode) {
         findTeam(teamId);
+        boolean isCoordinatorLevel = "COORDINATOR".equals(requesterRoleCode)
+                || "SUPER_COORDINATOR".equals(requesterRoleCode);
+        if (!isCoordinatorLevel) {
+            boolean isActiveMember = teamMemberRepository.findByTeamId(teamId).stream()
+                    .anyMatch(m -> m.getUser().getId().equals(requesterId)
+                            && m.getStatus() == TeamMemberStatus.ACTIVE);
+            if (!isActiveMember) {
+                throw new ForbiddenActionException(
+                        "Access denied: only team members or coordinators may view invitations");
+            }
+        }
         return teamInvitationRepository.findByTeamIdOrderByCreatedAtDesc(teamId)
                 .stream().map(InvitationResponse::from).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MyInvitationResponse> listMyInvitations(String email) {
+        return teamInvitationRepository.findByEmailAndStatus(email, InvitationStatus.PENDING)
+                .stream().map(MyInvitationResponse::from).toList();
     }
 
     // ─── FIX #1: Accept / decline invitation ──────────────────────────────────

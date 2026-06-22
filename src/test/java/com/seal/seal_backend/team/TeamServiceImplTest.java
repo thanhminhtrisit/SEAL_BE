@@ -373,6 +373,102 @@ class TeamServiceImplTest {
         }
     }
 
+    // ─── FIX 1: listInvitations authz ─────────────────────────────────────────
+
+    @Nested
+    class ListInvitations {
+
+        @Test
+        void coordinator_canViewInvitations() {
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamInvitationRepository.findByTeamIdOrderByCreatedAtDesc(1L)).thenReturn(List.of());
+
+            assertThatNoException().isThrownBy(() -> service.listInvitations(1L, 3L, "COORDINATOR"));
+        }
+
+        @Test
+        void superCoordinator_canViewInvitations() {
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamInvitationRepository.findByTeamIdOrderByCreatedAtDesc(1L)).thenReturn(List.of());
+
+            assertThatNoException().isThrownBy(() -> service.listInvitations(1L, 99L, "SUPER_COORDINATOR"));
+        }
+
+        @Test
+        void activeMemberOfTeam_canView() {
+            User member = new User();
+            member.setId(8L);
+            member.setEmail("member@student.local");
+            TeamMember tm = new TeamMember();
+            tm.setTeam(sampleTeam);
+            tm.setUser(member);
+            tm.setMemberRole(TeamMemberRole.MEMBER);
+            tm.setStatus(TeamMemberStatus.ACTIVE);
+
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember, tm));
+            when(teamInvitationRepository.findByTeamIdOrderByCreatedAtDesc(1L)).thenReturn(List.of());
+
+            assertThatNoException().isThrownBy(() -> service.listInvitations(1L, 8L, "TEAM_MEMBER"));
+        }
+
+        @Test
+        void userOutsideTeam_notCoordinator_throws_ForbiddenAction() {
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            // only the leader is in the team; outsider id=99 is not
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+
+            assertThatThrownBy(() -> service.listInvitations(1L, 99L, "TEAM_MEMBER"))
+                    .isInstanceOf(ForbiddenActionException.class);
+        }
+
+        @Test
+        void adminRole_cannotView_throws_ForbiddenAction() {
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+
+            assertThatThrownBy(() -> service.listInvitations(1L, 1L, "ADMIN"))
+                    .isInstanceOf(ForbiddenActionException.class);
+        }
+    }
+
+    // ─── FIX 2: listMyInvitations ─────────────────────────────────────────────
+
+    @Nested
+    class ListMyInvitations {
+
+        @Test
+        void returnsPendingInvitationsForEmail() {
+            TeamInvitation pending = new TeamInvitation();
+            pending.setId(10L);
+            pending.setTeam(sampleTeam);
+            pending.setEmail("invited@test.local");
+            pending.setStatus(InvitationStatus.PENDING);
+            pending.setInvitedBy(sampleLeader);
+            pending.setExpiresAt(java.time.LocalDateTime.now().plusDays(7));
+
+            when(teamInvitationRepository.findByEmailAndStatus("invited@test.local", InvitationStatus.PENDING))
+                    .thenReturn(List.of(pending));
+
+            var result = service.listMyInvitations("invited@test.local");
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).invitationId()).isEqualTo(10L);
+            assertThat(result.get(0).teamId()).isEqualTo(1L);
+            assertThat(result.get(0).teamName()).isEqualTo("Code Seals");
+            assertThat(result.get(0).eventId()).isEqualTo(1L);
+            assertThat(result.get(0).invitedByName()).isEqualTo("Team Leader");
+        }
+
+        @Test
+        void noInvitations_returnsEmptyList() {
+            when(teamInvitationRepository.findByEmailAndStatus("nobody@test.local", InvitationStatus.PENDING))
+                    .thenReturn(List.of());
+
+            assertThat(service.listMyInvitations("nobody@test.local")).isEmpty();
+        }
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private Category buildCategory(Long id, String name) {

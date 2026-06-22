@@ -15,7 +15,10 @@ public interface TeamService {
 
     // FR-TEAM-03: invite member by email (BR-TEAM-06: no duplicate in same event)
     InvitationResponse inviteMember(Long teamId, InviteMemberRequest req, Long inviterId);
-    List<InvitationResponse> listInvitations(Long teamId);
+    // FIX 1: authz — only COORDINATOR/SUPER_COORDINATOR or active team member
+    List<InvitationResponse> listInvitations(Long teamId, Long requesterId, String requesterRoleCode);
+    // FIX 2: invitations sent to the caller's email (PENDING only)
+    List<MyInvitationResponse> listMyInvitations(String email);
 
     // Accept / decline invitation (invitee calls these)
     TeamResponse acceptInvitation(Long invitationId, Long userId);

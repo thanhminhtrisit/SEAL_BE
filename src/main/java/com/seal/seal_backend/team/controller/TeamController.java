@@ -70,9 +70,19 @@ public class TeamController {
 
     @GetMapping("/{teamId}/invitations")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "List invitations for a team")
-    public ApiResponse<List<InvitationResponse>> listInvitations(@PathVariable Long teamId) {
-        return ApiResponse.ok(teamService.listInvitations(teamId));
+    @Operation(summary = "List invitations for a team — accessible by team members and coordinators only")
+    public ApiResponse<List<InvitationResponse>> listInvitations(
+            @PathVariable Long teamId,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok(teamService.listInvitations(teamId, user.getId(), user.getRoleCode()));
+    }
+
+    @GetMapping("/invitations/mine")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "List my pending invitations (sent to caller's email)")
+    public ApiResponse<List<MyInvitationResponse>> listMyInvitations(
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok(teamService.listMyInvitations(user.getEmail()));
     }
 
     @PostMapping("/invitations/{invitationId}/accept")
