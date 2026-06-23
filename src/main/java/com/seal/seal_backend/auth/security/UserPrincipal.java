@@ -34,6 +34,14 @@ public class UserPrincipal implements UserDetails {
         return new UserPrincipal(user.getId(), user.getEmail(), user.getPasswordHash(), auths);
     }
 
+    public String getRoleCode() {
+        return authorities.stream()
+                .map(GrantedAuthority::getAuthority)
+                .findFirst()
+                .map(a -> a.startsWith("ROLE_") ? a.substring(5) : a)
+                .orElse("TEAM_MEMBER");
+    }
+
     @Override public String getUsername()  { return email; }
     @Override public String getPassword()  { return passwordHash; }
     @Override public Collection<? extends GrantedAuthority> getAuthorities() { return authorities; }

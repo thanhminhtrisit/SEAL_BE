@@ -1,8 +1,10 @@
 package com.seal.seal_backend.auth.service.impl;
 
+import com.seal.seal_backend.auth.dto.request.CreateGuestJudgeRequest;
 import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
+import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
 import com.seal.seal_backend.auth.security.JwtTokenProvider;
 import com.seal.seal_backend.auth.security.UserPrincipal;
@@ -24,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.regex.Pattern;
 
@@ -197,6 +200,61 @@ public class AuthServiceImpl implements AuthService {
         return PageResponse.of(
                 userRepository.findAllByStatus(UserStatus.PENDING, pageable)
                         .map(PendingAccountResponse::from));
+    }
+
+    @Override
+    @Transactional
+    public GuestJudgeResponse createGuestJudge(CreateGuestJudgeRequest req, Long creatorId) {
+        userRepository.findByEmail(req.email()).ifPresent(existing -> {
+            throw new BusinessRuleException("BR-USR-01",
+                    "Email is already registered: " + req.email());
+        });
+
+        Role judgeRole = roleRepository.findByCode("JUDGE")
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "System role JUDGE not found — ensure db/schema.sql seed data is loaded."));
+        User creator = userRepository.findById(creatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", creatorId));
+
+        String tempPassword = generateTemporaryPassword();
+
+        User user = new User();
+        user.setEmail(req.email());
+        user.setFullName(req.fullName());
+        user.setPhone(req.phone());
+        user.setPasswordHash(passwordEncoder.encode(tempPassword));
+        user.setAccountType(AccountType.GUEST_JUDGE);
+        user.setPrimaryRole(judgeRole);
+        user.setStatus(UserStatus.ACTIVE);
+
+        User saved = userRepository.save(user);
+
+        auditPublisher.log(creator, AuditAction.STAFF_ACCOUNT_CREATED, "USER", saved.getId(),
+                null, "{\"accountType\":\"GUEST_JUDGE\",\"status\":\"ACTIVE\"}", null, null);
+
+        return new GuestJudgeResponse(saved.getId(), saved.getEmail(), saved.getFullName(), tempPassword);
+    }
+
+    private static final String TEMP_PASSWORD_CHARS =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    private String generateTemporaryPassword() {
+        StringBuilder sb = new StringBuilder(12);
+        // Guarantee at least one uppercase, one digit
+        sb.append(TEMP_PASSWORD_CHARS.charAt(SECURE_RANDOM.nextInt(26)));            // uppercase
+        sb.append(TEMP_PASSWORD_CHARS.charAt(26 + SECURE_RANDOM.nextInt(26)));       // lowercase
+        sb.append(TEMP_PASSWORD_CHARS.charAt(52 + SECURE_RANDOM.nextInt(10)));       // digit
+        for (int i = 3; i < 12; i++) {
+            sb.append(TEMP_PASSWORD_CHARS.charAt(SECURE_RANDOM.nextInt(TEMP_PASSWORD_CHARS.length())));
+        }
+        // Shuffle
+        char[] chars = sb.toString().toCharArray();
+        for (int i = chars.length - 1; i > 0; i--) {
+            int j = SECURE_RANDOM.nextInt(i + 1);
+            char tmp = chars[i]; chars[i] = chars[j]; chars[j] = tmp;
+        }
+        return new String(chars);
     }
 
     private void validatePasswordStrength(String password) {

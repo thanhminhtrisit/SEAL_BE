@@ -1,10 +1,12 @@
 package com.seal.seal_backend.auth.controller;
 
+import com.seal.seal_backend.auth.dto.request.CreateGuestJudgeRequest;
 import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.request.RejectAccountRequest;
 import com.seal.seal_backend.auth.dto.response.AccountStatusResponse;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
+import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
 import com.seal.seal_backend.auth.dto.response.RegisterResponse;
 import com.seal.seal_backend.auth.security.UserPrincipal;
@@ -115,6 +117,20 @@ public class AuthController {
                 "Your account registration was rejected. Reason: " + req.reason());
         return ResponseEntity.ok(ApiResponse.ok("Account rejected.",
                 new AccountStatusResponse(userId, UserStatus.REJECTED)));
+    }
+
+    // ─── Guest Judge creation (FR-AUTH-09) ───────────────────────────────────
+
+    @PostMapping("/guest-judges")
+    @PreAuthorize("hasAnyRole('COORDINATOR','ADMIN')")
+    @Operation(summary = "Create a guest-judge account (FR-AUTH-09)",
+               description = "Creates ACTIVE account with role JUDGE. Returns temp password — shown only once.")
+    public ResponseEntity<ApiResponse<GuestJudgeResponse>> createGuestJudge(
+            @Valid @RequestBody CreateGuestJudgeRequest req,
+            @CurrentUser UserPrincipal user) {
+        GuestJudgeResponse response = authService.createGuestJudge(req, user.getId());
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(
+                "Guest judge account created. Share the temporary password securely.", response));
     }
 
     private void notifyBestEffort(Long recipientId, String type, String title, String message) {

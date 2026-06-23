@@ -1,14 +1,20 @@
 package com.seal.seal_backend.event;
 
+import com.seal.seal_backend.common.audit.AuditAction;
+import com.seal.seal_backend.common.audit.AuditPublisher;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
+import com.seal.seal_backend.common.exception.ForbiddenActionException;
 import com.seal.seal_backend.common.exception.ResourceNotFoundException;
 import com.seal.seal_backend.domain.entity.*;
+import com.seal.seal_backend.domain.enums.AssignmentStatus;
 import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.domain.enums.EventType;
+import com.seal.seal_backend.domain.enums.TermType;
 import com.seal.seal_backend.domain.repository.*;
 import com.seal.seal_backend.event.dto.request.*;
 import com.seal.seal_backend.event.dto.response.*;
 import com.seal.seal_backend.event.service.impl.EventServiceImpl;
+import com.seal.seal_backend.shared.contract.JudgeQueryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -36,6 +42,11 @@ class EventServiceImplTest {
     @Mock DisciplineRepository disciplineRepository;
     @Mock TermPlanRepository termPlanRepository;
     @Mock UserRepository userRepository;
+    @Mock CategoryRepository categoryRepository;
+    @Mock JudgeAssignmentRepository judgeAssignmentRepository;
+    @Mock EventBudgetRepository eventBudgetRepository;
+    @Mock AuditPublisher auditPublisher;
+    @Mock JudgeQueryPort judgeQueryPort;
 
     @InjectMocks EventServiceImpl service;
 
@@ -52,6 +63,8 @@ class EventServiceImplTest {
 
         sampleTermPlan = new TermPlan();
         sampleTermPlan.setId(1L);
+        sampleTermPlan.setTerm(TermType.SUMMER);
+        sampleTermPlan.setDiscipline(sampleDiscipline);
 
         sampleUser = new User();
         sampleUser.setId(3L);
@@ -215,6 +228,290 @@ class EventServiceImplTest {
             sc.setDisplayOrder(order);
             sc.setIsActive(true);
             return sc;
+        }
+    }
+
+    // ─── Judge Assignment ─────────────────────────────────────────────────────
+
+    @Nested
+    class JudgeAssignment {
+
+        private Event event;
+        private Round round;
+        private User judge;
+        private User coordinator;
+        private Role judgeRole;
+
+        @BeforeEach
+        void setup() {
+            judgeRole = new Role();
+            judgeRole.setId(4L);
+            judgeRole.setCode("JUDGE");
+
+            event = new Event();
+            event.setId(1L);
+
+            round = new Round();
+            round.setId(10L);
+            round.setEvent(event);
+
+            judge = new User();
+            judge.setId(20L);
+            judge.setPrimaryRole(judgeRole);
+
+            coordinator = new User();
+            coordinator.setId(99L);
+        }
+
+        @Test
+        void assignJudge_duplicate_throws_BR_JDG_02() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(event));
+            when(roundRepository.findById(10L)).thenReturn(Optional.of(round));
+            when(userRepository.findById(20L)).thenReturn(Optional.of(judge));
+            when(judgeAssignmentRepository.existsByJudgeIdAndRoundIdAndStatus(
+                    20L, 10L, AssignmentStatus.ACTIVE)).thenReturn(true);
+
+            assertThatThrownBy(() -> service.assignJudge(1L, 10L,
+                    new AssignJudgeRequest(20L, null), 99L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-JDG-02");
+        }
+
+        @Test
+        void assignJudge_nonJudgeUser_throws_BR_JDG_01() {
+            Role memberRole = new Role();
+            memberRole.setId(7L);
+            memberRole.setCode("TEAM_MEMBER");
+            judge.setPrimaryRole(memberRole);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(event));
+            when(roundRepository.findById(10L)).thenReturn(Optional.of(round));
+            when(userRepository.findById(20L)).thenReturn(Optional.of(judge));
+
+            assertThatThrownBy(() -> service.assignJudge(1L, 10L,
+                    new AssignJudgeRequest(20L, null), 99L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-JDG-01");
+        }
+    }
+
+    // ─── Submit Event ─────────────────────────────────────────────────────────
+
+    @Nested
+    class SubmitEvent {
+
+        private Round round;
+        private CriteriaSet cs;
+        private ScoringCriterion crit;
+        private Category category;
+
+        @BeforeEach
+        void setup() {
+            round = new Round();
+            round.setId(10L);
+            round.setName("Round 1");
+            round.setEvent(sampleEvent);
+
+            cs = new CriteriaSet();
+            cs.setId(5L);
+            cs.setEvent(sampleEvent);
+
+            crit = new ScoringCriterion();
+            crit.setId(1L);
+            crit.setWeight(new BigDecimal("100"));
+
+            category = new Category();
+            category.setId(20L);
+            category.setEvent(sampleEvent);
+        }
+
+        @Test
+        void missingRound_throws_BR_EVT_08() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findByEventIdOrderByOrderNumber(1L)).thenReturn(List.of());
+
+            assertThatThrownBy(() -> service.submitEvent(1L, 3L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-08");
+        }
+
+        @Test
+        void missingJudge_throws_BR_EVT_06() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findByEventIdOrderByOrderNumber(1L)).thenReturn(List.of(round));
+            when(criteriaSetRepository.findFirstByRoundId(10L)).thenReturn(Optional.of(cs));
+            when(scoringCriterionRepository.findByCriteriaSetIdOrderByDisplayOrder(5L))
+                    .thenReturn(List.of(crit));
+            when(judgeQueryPort.judgeIdsForRound(10L)).thenReturn(List.of()); // no judges
+
+            assertThatThrownBy(() -> service.submitEvent(1L, 3L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-06");
+        }
+
+        @Test
+        void missingBudget_throws_BR_EVT_09() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findByEventIdOrderByOrderNumber(1L)).thenReturn(List.of(round));
+            when(criteriaSetRepository.findFirstByRoundId(10L)).thenReturn(Optional.of(cs));
+            when(scoringCriterionRepository.findByCriteriaSetIdOrderByDisplayOrder(5L))
+                    .thenReturn(List.of(crit));
+            when(judgeQueryPort.judgeIdsForRound(10L)).thenReturn(List.of(99L));
+            when(eventBudgetRepository.findByEventId(1L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.submitEvent(1L, 3L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-09");
+        }
+
+        @Test
+        void completeEvent_setsPendingApprovalAndAudits() {
+            EventBudget budget = new EventBudget();
+            budget.setId(1L);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findByEventIdOrderByOrderNumber(1L)).thenReturn(List.of(round));
+            when(criteriaSetRepository.findFirstByRoundId(10L)).thenReturn(Optional.of(cs));
+            when(scoringCriterionRepository.findByCriteriaSetIdOrderByDisplayOrder(5L))
+                    .thenReturn(List.of(crit));
+            when(judgeQueryPort.judgeIdsForRound(10L)).thenReturn(List.of(99L));
+            when(eventBudgetRepository.findByEventId(1L)).thenReturn(Optional.of(budget));
+            when(categoryRepository.findByEventIdOrderByCreatedAtAsc(1L)).thenReturn(List.of(category));
+            when(eventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(userRepository.findById(3L)).thenReturn(Optional.of(sampleUser));
+
+            EventResponse resp = service.submitEvent(1L, 3L);
+
+            assertThat(resp.status()).isEqualTo(EventStatus.PENDING_APPROVAL);
+            verify(eventRepository).save(argThat(e ->
+                    e.getStatus() == EventStatus.PENDING_APPROVAL
+                    && e.getSubmittedAt() != null));
+            verify(auditPublisher).log(eq(sampleUser), eq(AuditAction.EVENT_SUBMITTED),
+                    eq("EVENT"), eq(1L), any(), any(), isNull(), isNull());
+        }
+
+        @Test
+        void notOwner_throws_ForbiddenActionException() {
+            User otherUser = new User();
+            otherUser.setId(999L);
+            // sampleEvent's owner is sampleUser (id=3), submitting as user 999
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.submitEvent(1L, 999L))
+                    .isInstanceOf(ForbiddenActionException.class);
+        }
+    }
+
+    // ─── Pending Lock ─────────────────────────────────────────────────────────
+
+    @Nested
+    class PendingLock {
+
+        @Test
+        void updateEvent_pendingApproval_throws_BR_EVT_07() {
+            sampleEvent.setStatus(EventStatus.PENDING_APPROVAL);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.update(1L,
+                    new UpdateEventRequest("New Name", null, null, null)))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
+        }
+
+        @Test
+        void addRound_pendingApproval_throws_BR_EVT_07() {
+            sampleEvent.setStatus(EventStatus.PENDING_APPROVAL);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.addRound(1L,
+                    new CreateRoundRequest("R1", 1, null, null, false)))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
+        }
+    }
+
+    // ─── Lifecycle transitions ────────────────────────────────────────────────
+
+    @Nested
+    class Lifecycle {
+
+        @Test
+        void open_whenNotApproved_throws_BR_EVT_11() {
+            // sampleEvent is DRAFT — cannot open
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.openEvent(1L, 3L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-11");
+        }
+
+        @Test
+        void start_whenNotOpen_throws_BR_EVT_11() {
+            sampleEvent.setStatus(EventStatus.DRAFT);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.startEvent(1L, 3L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-11");
+        }
+
+        @Test
+        void open_whenApproved_setsOpenAndAudits() {
+            sampleEvent.setStatus(EventStatus.APPROVED);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(eventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(userRepository.findById(3L)).thenReturn(Optional.of(sampleUser));
+
+            EventResponse resp = service.openEvent(1L, 3L);
+
+            assertThat(resp.status()).isEqualTo(EventStatus.OPEN);
+            verify(auditPublisher).log(eq(sampleUser), eq(AuditAction.EVENT_OPENED),
+                    eq("EVENT"), eq(1L), any(), any(), isNull(), isNull());
+        }
+
+        @Test
+        void start_whenOpen_setsInProgress() {
+            sampleEvent.setStatus(EventStatus.OPEN);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(eventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(userRepository.findById(3L)).thenReturn(Optional.of(sampleUser));
+
+            EventResponse resp = service.startEvent(1L, 3L);
+
+            assertThat(resp.status()).isEqualTo(EventStatus.IN_PROGRESS);
+            verify(auditPublisher).log(eq(sampleUser), eq(AuditAction.EVENT_STARTED),
+                    eq("EVENT"), eq(1L), any(), any(), isNull(), isNull());
+        }
+
+        @Test
+        void complete_whenInProgress_setsCompleted() {
+            sampleEvent.setStatus(EventStatus.IN_PROGRESS);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(eventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(userRepository.findById(3L)).thenReturn(Optional.of(sampleUser));
+
+            EventResponse resp = service.completeEvent(1L, 3L);
+
+            assertThat(resp.status()).isEqualTo(EventStatus.COMPLETED);
+            verify(auditPublisher).log(eq(sampleUser), eq(AuditAction.EVENT_COMPLETED),
+                    eq("EVENT"), eq(1L), any(), any(), isNull(), isNull());
+        }
+
+        @Test
+        void archive_whenCompleted_setsArchivedAndSetsTimestamp() {
+            sampleEvent.setStatus(EventStatus.COMPLETED);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(eventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(userRepository.findById(3L)).thenReturn(Optional.of(sampleUser));
+
+            EventResponse resp = service.archiveEvent(1L, 3L);
+
+            assertThat(resp.status()).isEqualTo(EventStatus.ARCHIVED);
+            verify(eventRepository).save(argThat(e ->
+                    e.getStatus() == EventStatus.ARCHIVED
+                    && e.getArchivedAt() != null));
+            verify(auditPublisher).log(eq(sampleUser), eq(AuditAction.EVENT_ARCHIVED),
+                    eq("EVENT"), eq(1L), any(), any(), isNull(), isNull());
         }
     }
 }

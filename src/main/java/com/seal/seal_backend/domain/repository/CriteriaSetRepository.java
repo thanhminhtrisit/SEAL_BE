@@ -10,4 +10,5 @@ import java.util.Optional;
 public interface CriteriaSetRepository extends JpaRepository<CriteriaSet, Long> {
     List<CriteriaSet> findByEventId(Long eventId);
     Optional<CriteriaSet> findFirstByRoundId(Long roundId);
+    Optional<CriteriaSet> findFirstByEventIdAndRoundIsNull(Long eventId);
 }

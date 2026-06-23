@@ -65,3 +65,6 @@ Thumbs.db
 ~$*
 *.tmp
 *~
+
+docs/api-tests/
+docs/M1_BACKEND_SUMMARY_AND_TESTS.md

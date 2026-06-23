@@ -158,4 +158,93 @@ public class EventController {
             @Valid @RequestBody UpdateCategoryRequest req) {
         return ApiResponse.ok(eventService.updateCategory(eventId, categoryId, req));
     }
+
+    // ─── Submit (FR-EVT-07) ───────────────────────────────────────────────────
+
+    @PostMapping("/{eventId}/submit")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Submit event for approval (FR-EVT-07)",
+               description = "Transitions DRAFT or REJECTED → PENDING_APPROVAL after completeness checks. Only the owner coordinator may submit.")
+    public ResponseEntity<ApiResponse<EventResponse>> submitEvent(
+            @PathVariable Long eventId,
+            @CurrentUser UserPrincipal user) {
+        return ResponseEntity.ok(ApiResponse.ok("Event submitted for approval.",
+                eventService.submitEvent(eventId, user.getId())));
+    }
+
+    // ─── Lifecycle (FR-EVT-07) ───────────────────────────────────────────────
+
+    @PostMapping("/{eventId}/open")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Open event for team registration (APPROVED → OPEN)")
+    public ResponseEntity<ApiResponse<EventResponse>> openEvent(
+            @PathVariable Long eventId,
+            @CurrentUser UserPrincipal user) {
+        return ResponseEntity.ok(ApiResponse.ok("Event opened.",
+                eventService.openEvent(eventId, user.getId())));
+    }
+
+    @PostMapping("/{eventId}/start")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Start event execution (OPEN → IN_PROGRESS)")
+    public ResponseEntity<ApiResponse<EventResponse>> startEvent(
+            @PathVariable Long eventId,
+            @CurrentUser UserPrincipal user) {
+        return ResponseEntity.ok(ApiResponse.ok("Event started.",
+                eventService.startEvent(eventId, user.getId())));
+    }
+
+    @PostMapping("/{eventId}/complete")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Mark event as completed (IN_PROGRESS → COMPLETED)")
+    public ResponseEntity<ApiResponse<EventResponse>> completeEvent(
+            @PathVariable Long eventId,
+            @CurrentUser UserPrincipal user) {
+        return ResponseEntity.ok(ApiResponse.ok("Event completed.",
+                eventService.completeEvent(eventId, user.getId())));
+    }
+
+    @PostMapping("/{eventId}/archive")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Archive event (COMPLETED → ARCHIVED)")
+    public ResponseEntity<ApiResponse<EventResponse>> archiveEvent(
+            @PathVariable Long eventId,
+            @CurrentUser UserPrincipal user) {
+        return ResponseEntity.ok(ApiResponse.ok("Event archived.",
+                eventService.archiveEvent(eventId, user.getId())));
+    }
+
+    // ─── Judge Assignment ─────────────────────────────────────────────────────
+
+    @PostMapping("/{eventId}/rounds/{roundId}/judges")
+    @PreAuthorize("hasAnyRole('COORDINATOR','ADMIN')")
+    @Operation(summary = "Assign a judge to a round")
+    public ResponseEntity<ApiResponse<JudgeAssignmentResponse>> assignJudge(
+            @PathVariable Long eventId,
+            @PathVariable Long roundId,
+            @Valid @RequestBody AssignJudgeRequest req,
+            @CurrentUser UserPrincipal user) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(eventService.assignJudge(eventId, roundId, req, user.getId())));
+    }
+
+    @DeleteMapping("/{eventId}/rounds/{roundId}/judges/{assignmentId}")
+    @PreAuthorize("hasAnyRole('COORDINATOR','ADMIN')")
+    @Operation(summary = "Revoke a judge assignment from a round")
+    public ApiResponse<Void> revokeJudge(
+            @PathVariable Long eventId,
+            @PathVariable Long roundId,
+            @PathVariable Long assignmentId) {
+        eventService.revokeJudge(eventId, roundId, assignmentId);
+        return ApiResponse.ok("Judge assignment revoked.", null);
+    }
+
+    @GetMapping("/{eventId}/rounds/{roundId}/judges")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "List active judge assignments for a round")
+    public ApiResponse<List<JudgeAssignmentResponse>> listJudgeAssignments(
+            @PathVariable Long eventId,
+            @PathVariable Long roundId) {
+        return ApiResponse.ok(eventService.listJudgeAssignments(eventId, roundId));
+    }
 }
