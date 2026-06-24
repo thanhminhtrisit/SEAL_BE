@@ -89,7 +89,13 @@ public class RankingServiceImpl implements RankingService {
             Event eventRef = new Event(); eventRef.setId(1L);
             Round roundRef = new Round(); roundRef.setId(roundId);
             Team teamRef = new Team(); teamRef.setId(r.teamId());
-            User userRef = new User(); userRef.setId(userId);
+
+            // Xử lý an toàn: Nếu Auth truyền null, bỏ qua không set User để tránh crash Hibernate
+            User userRef = null;
+            if (userId != null) {
+                userRef = new User();
+                userRef.setId(userId);
+            }
             Category categoryRef = null;
             Long actualCategoryId = teamCategoryMap.get(r.teamId());
             if (actualCategoryId != null) {

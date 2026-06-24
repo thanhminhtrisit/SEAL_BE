@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -36,6 +37,7 @@ public class SubmissionController {
         return ApiResponse.ok("Submission Tracking module is alive");
     }
 
+    @PreAuthorize("hasRole('TEAM_LEADER')")
     @PostMapping
     public ResponseEntity<SubmissionResponseDTO> createSubmission(
             @RequestBody CreateSubmissionRequestDTO request,
@@ -46,6 +48,7 @@ public class SubmissionController {
         );
     }
 
+    @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER')")
     @GetMapping("/{id}")
     public ResponseEntity<SubmissionDetailResponseDTO>
     getSubmission(@PathVariable Long id) {
@@ -55,6 +58,7 @@ public class SubmissionController {
         );
     }
 
+    @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER')")
     @GetMapping("/{id}/current-version")
     public ResponseEntity<SubmissionVersionResponseDTO>
     getCurrentVersion(@PathVariable Long id) {
@@ -64,6 +68,7 @@ public class SubmissionController {
         );
     }
 
+    @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER')")
     @GetMapping("/{id}/versions")
     public ResponseEntity<List<SubmissionVersionResponseDTO>>
     getVersions(@PathVariable Long id) {
@@ -73,6 +78,7 @@ public class SubmissionController {
         );
     }
 
+    @PreAuthorize("hasRole('TEAM_LEADER')")
     @PostMapping("/{id}/versions")
     public ResponseEntity<SubmissionVersionResponseDTO>
     createVersion(
@@ -104,6 +110,7 @@ public class SubmissionController {
         return ResponseEntity.ok().build();
     }
 
+
     @PutMapping("/versions/{versionId}")
     public ResponseEntity<SubmissionVersionResponseDTO>
     updateVersion(
@@ -119,6 +126,7 @@ public class SubmissionController {
         );
     }
 
+    @PreAuthorize("hasRole('TEAM_LEADER')")
     @PatchMapping("/{submissionId}/select-version")
     public ResponseEntity<Void> selectVersion(
             @PathVariable Long submissionId,
