@@ -12,6 +12,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
     List<Team> findByEventIdOrderByCreatedAtAsc(Long eventId);
     boolean existsByEventIdAndName(Long eventId, String name);
     boolean existsByEventIdAndCategoryIdAndIdNot(Long eventId, Long categoryId, Long excludeTeamId);
+    boolean existsByCategoryId(Long categoryId);
 
     @Query("SELECT COUNT(tm) > 0 FROM TeamMember tm " +
            "WHERE tm.user.id = :userId AND tm.team.event.id = :eventId " +

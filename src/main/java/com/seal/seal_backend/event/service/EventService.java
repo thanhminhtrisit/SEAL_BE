@@ -22,12 +22,20 @@ public interface EventService {
     CriteriaSetResponse addCriteriaSet(Long eventId, CreateCriteriaSetRequest req, Long creatorId);
     List<CriteriaSetResponse> listCriteriaSets(Long eventId);
     CriteriaSetResponse getCriteriaSet(Long eventId, Long setId);
+    CriteriaSetResponse updateCriteriaSet(Long eventId, Long setId, UpdateCriteriaSetRequest req);
+    CriteriaSetResponse replaceCriteria(Long eventId, Long setId, ReplaceCriteriaRequest req);
+    void deleteCriteriaSet(Long eventId, Long setId);
+    CriteriaSetResponse deleteCriterion(Long eventId, Long setId, Long criterionId);
+
+    // --- Round delete ---
+    void deleteRound(Long eventId, Long roundId);
 
     // --- Category (FR-EVT-04) ---
     CategoryResponse addCategory(Long eventId, CreateCategoryRequest req);
     List<CategoryResponse> listCategories(Long eventId);
     CategoryResponse getCategory(Long eventId, Long categoryId);
     CategoryResponse updateCategory(Long eventId, Long categoryId, UpdateCategoryRequest req);
+    void deleteCategory(Long eventId, Long categoryId);
 
     // --- Judge Assignment ---
     JudgeAssignmentResponse assignJudge(Long eventId, Long roundId, AssignJudgeRequest req, Long assignedById);
