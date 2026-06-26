@@ -3,6 +3,7 @@ package com.seal.seal_backend.ranking.service.impl;
 import com.seal.seal_backend.domain.entity.*;
 import com.seal.seal_backend.domain.repository.RankingRepository;
 import com.seal.seal_backend.domain.repository.RoundRepository; // Đảm bảo đã import RoundRepository
+import com.seal.seal_backend.domain.repository.SubmissionRepository;
 import com.seal.seal_backend.ranking.dto.response.RankingResponse;
 import com.seal.seal_backend.ranking.service.RankingService;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ public class RankingServiceImpl implements RankingService {
 
     private final RankingRepository rankingRepository;
     private final RoundRepository roundRepository; // Cần thiết để findById
+    private final SubmissionRepository submissionRepository;
     private final RankingDataProvider dataProvider;
 
     @Autowired
@@ -108,8 +110,6 @@ public class RankingServiceImpl implements RankingService {
         // 3. XÓA CŨ & LƯU MỚI
         log.info("Xóa bảng xếp hạng cũ của vòng thi: {}", roundId);
         rankingRepository.deleteByRoundId(roundId);
-
-        // ... (Giữ nguyên đoạn code xử lý lưu DB và Map DTO từ vòng lặp entitiesToSave trở đi)
 
         Map<Long, Long> teamCategoryMap = new HashMap<>();
         for (RankingDataProvider.TeamView t : validTeams) {
@@ -211,8 +211,44 @@ public class RankingServiceImpl implements RankingService {
     public void disqualifyTeam(Long teamId, String reason, Long userId) {
         log.info("Coordinator {} đang đình chỉ Team {} với lý do: {}", userId, teamId, reason);
 
-        // 1. Cập nhật trạng thái đội thành DISQUALIFIED
-        String updateSql = "UPDATE teams SET status = 'DISQUALIFIED' WHERE id = ?";
-        jdbcTemplate.update(updateSql, teamId);
+        // Sử dụng chính xác cột disqualified_reason và disqualified_by, disqualified_at
+        String updateSql = "UPDATE teams SET status = 'DISQUALIFIED', " +
+                "disqualified_reason = ?, " +
+                "disqualified_by = ?, " +
+                "disqualified_at = NOW() WHERE id = ?";
+
+        jdbcTemplate.update(updateSql, reason, userId, teamId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getDisqualifiedTeams(Long eventId) {
+        log.info("Lấy danh sách đội bị đình chỉ cho Event ID: {}", eventId);
+
+        // Đổi từ disqualify_reason thành disqualified_reason
+        String sql = "SELECT id, name, disqualified_reason FROM teams WHERE event_id = ? AND status = 'DISQUALIFIED'";
+
+        return jdbcTemplate.queryForList(sql, eventId);
+    }
+
+    @Transactional
+    public void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds) {
+        Round current = roundRepository.findById(currentRoundId)
+                .orElseThrow(() -> new RuntimeException("Round không tồn tại"));
+
+        List<Round> nextRounds = roundRepository.findNextRounds(current.getEvent().getId(), current.getOrderNumber());
+        Round nextRound = nextRounds.isEmpty() ? null : nextRounds.get(0);
+
+        if (nextRound == null) {
+            throw new RuntimeException("Đây đã là vòng thi cuối cùng, không thể thăng hạng!");
+        }
+
+        for (Long teamId : teamIds) {
+            // Kiểm tra tránh tạo trùng
+            if (!submissionRepository.existsByTeamIdAndRoundId(teamId, nextRound.getId())) {
+                submissionRepository.createPlaceholderSubmission(teamId, nextRound.getId());
+            }
+        }
+        log.info("Đã thăng hạng thành công {} đội sang vòng {}", teamIds.size(), nextRound.getName());
     }
 }

@@ -3,6 +3,7 @@ package com.seal.seal_backend.ranking.service;
 import com.seal.seal_backend.ranking.dto.response.RankingResponse;
 
 import java.util.List;
+import java.util.Map;
 
 public interface RankingService {
     /**
@@ -14,5 +15,10 @@ public interface RankingService {
      * Lấy danh sách kết quả xếp hạng
      */
     List<RankingResponse> getRankingsByRound(Long roundId);
+
     void disqualifyTeam(Long teamId, String reason, Long userId);
+
+    List<Map<String, Object>> getDisqualifiedTeams(Long eventId);
+
+    void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds);
 }

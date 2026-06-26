@@ -2,6 +2,8 @@ package com.seal.seal_backend.ranking.controller;
 
 import com.seal.seal_backend.common.api.ApiResponse;
 import com.seal.seal_backend.common.security.CurrentUser;
+import com.seal.seal_backend.domain.repository.RoundRepository;
+import com.seal.seal_backend.domain.repository.SubmissionRepository;
 import com.seal.seal_backend.ranking.dto.response.RankingResponse;
 import com.seal.seal_backend.ranking.service.RankingService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,6 +23,9 @@ import java.util.Map;
 public class RankingController {
 
     private final RankingService rankingService;
+    private final RoundRepository roundRepository;
+    private final SubmissionRepository submissionRepository;
+
 
     @GetMapping("/ping")
     public ResponseEntity<ApiResponse<String>> ping() {
@@ -57,5 +62,27 @@ public class RankingController {
         rankingService.disqualifyTeam(teamId, reason, userId);
 
         return ResponseEntity.ok(ApiResponse.ok("Đã đình chỉ đội thi thành công"));
+    }
+
+    @GetMapping("/events/{eventId}/disqualified")
+    @Operation(summary = "Lấy danh sách các đội bị đình chỉ trong sự kiện")
+    @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getDisqualifiedTeams(@PathVariable Long eventId) {
+        List<Map<String, Object>> disqualifiedTeams = rankingService.getDisqualifiedTeams(eventId);
+        return ResponseEntity.ok(ApiResponse.ok(disqualifiedTeams));
+    }
+
+    @PostMapping("/rounds/{roundId}/promote")
+    @Operation(summary = "Thăng hạng thủ công các đội sang vòng tiếp theo")
+    @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
+    public ResponseEntity<ApiResponse<String>> promoteTeams(
+            @PathVariable Long roundId,
+            @RequestBody List<Long> teamIds) {
+
+        // Chỉ cần gọi service, nếu lỗi nó sẽ tự quăng RuntimeException
+        // Global Exception Handler của hệ thống sẽ tự lo phần trả về lỗi
+        rankingService.promoteTeamsToNextRound(roundId, teamIds);
+
+        return ResponseEntity.ok(ApiResponse.ok("Đã chuyển các đội vào vòng tiếp theo thành công!"));
     }
 }
