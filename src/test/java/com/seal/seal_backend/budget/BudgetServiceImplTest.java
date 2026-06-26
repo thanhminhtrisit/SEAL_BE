@@ -2,6 +2,8 @@ package com.seal.seal_backend.budget;
 
 import com.seal.seal_backend.budget.dto.request.CreateBudgetItemRequest;
 import com.seal.seal_backend.budget.dto.request.CreateBudgetRequest;
+import com.seal.seal_backend.budget.dto.request.UpdateBudgetRequest;
+import com.seal.seal_backend.domain.enums.BudgetStatus;
 import com.seal.seal_backend.budget.dto.response.BudgetResponse;
 import com.seal.seal_backend.budget.service.impl.BudgetServiceImpl;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
@@ -238,6 +240,51 @@ class BudgetServiceImplTest {
 
             assertThatThrownBy(() -> budgetService.deleteItem(10L, 5L))
                     .isInstanceOf(ForbiddenActionException.class);
+        }
+    }
+
+    // ─── Patch Budget Header ──────────────────────────────────────────────────
+
+    @Nested
+    class PatchBudget {
+
+        @Test
+        void patchCurrency_updatesSuccessfully() {
+            event.setStatus(EventStatus.DRAFT);
+            when(eventRepository.findById(10L)).thenReturn(Optional.of(event));
+            when(eventBudgetRepository.findByEventId(10L)).thenReturn(Optional.of(budget));
+            when(eventBudgetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(budgetItemRepository.findByBudgetId(1L)).thenReturn(List.of());
+
+            BudgetResponse res = budgetService.patchBudget(10L, new UpdateBudgetRequest("USD", null));
+
+            assertThat(res.currency()).isEqualTo("USD");
+            assertThat(res.status()).isEqualTo("DRAFT");
+        }
+
+        @Test
+        void patchStatus_updatesSuccessfully() {
+            event.setStatus(EventStatus.DRAFT);
+            when(eventRepository.findById(10L)).thenReturn(Optional.of(event));
+            when(eventBudgetRepository.findByEventId(10L)).thenReturn(Optional.of(budget));
+            when(eventBudgetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(budgetItemRepository.findByBudgetId(1L)).thenReturn(List.of());
+
+            BudgetResponse res = budgetService.patchBudget(10L,
+                    new UpdateBudgetRequest(null, BudgetStatus.PENDING_APPROVAL));
+
+            assertThat(res.status()).isEqualTo("PENDING_APPROVAL");
+        }
+
+        @Test
+        void patchBudget_pendingApprovalEvent_throws_BR_EVT_07() {
+            event.setStatus(EventStatus.PENDING_APPROVAL);
+            when(eventRepository.findById(10L)).thenReturn(Optional.of(event));
+
+            assertThatThrownBy(() -> budgetService.patchBudget(10L,
+                    new UpdateBudgetRequest("USD", null)))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
         }
     }
 

@@ -3,6 +3,7 @@ package com.seal.seal_backend.budget.controller;
 import com.seal.seal_backend.budget.dto.request.CreateBudgetItemRequest;
 import com.seal.seal_backend.budget.dto.request.CreateBudgetRequest;
 import com.seal.seal_backend.budget.dto.request.UpdateBudgetItemRequest;
+import com.seal.seal_backend.budget.dto.request.UpdateBudgetRequest;
 import com.seal.seal_backend.budget.dto.response.BudgetCategoryResponse;
 import com.seal.seal_backend.budget.dto.response.BudgetResponse;
 import com.seal.seal_backend.budget.service.BudgetService;
@@ -42,6 +43,15 @@ public class BudgetController {
     @Operation(summary = "Get budget with items and total (FR-BGT-01)")
     public ApiResponse<BudgetResponse> getBudget(@PathVariable Long eventId) {
         return ApiResponse.ok(budgetService.getBudget(eventId));
+    }
+
+    @PatchMapping("/api/events/{eventId}/budget")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Update budget header — currency and/or status (FR-BGT-01)", description = "Only allowed when event is not PENDING_APPROVAL.")
+    public ApiResponse<BudgetResponse> patchBudget(
+            @PathVariable Long eventId,
+            @Valid @RequestBody UpdateBudgetRequest req) {
+        return ApiResponse.ok(budgetService.patchBudget(eventId, req));
     }
 
     // ─── Budget Items ─────────────────────────────────────────────────────────
