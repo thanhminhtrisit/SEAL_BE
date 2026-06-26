@@ -6,4 +6,7 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface RankingRepository extends JpaRepository<Ranking, Long> {
+    boolean existsByRoundIdAndTeamIdAndIsPromotedTrue(Long roundId, Long teamId);
+
+    boolean existsByRoundIdAndTeamId(Long roundId, Long teamId);
 }
