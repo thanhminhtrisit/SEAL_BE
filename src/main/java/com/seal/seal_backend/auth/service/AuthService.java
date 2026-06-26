@@ -5,6 +5,7 @@ import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
 import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
+import com.seal.seal_backend.auth.dto.response.MeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
 import com.seal.seal_backend.common.api.PageResponse;
 import org.springframework.data.domain.Pageable;
@@ -17,4 +18,5 @@ public interface AuthService {
     void rejectAccount(Long userId, Long approverId, String reason);
     PageResponse<PendingAccountResponse> listPendingAccounts(Pageable pageable);
     GuestJudgeResponse createGuestJudge(CreateGuestJudgeRequest req, Long creatorId);
+    MeResponse getCurrentUser(Long userId);
 }

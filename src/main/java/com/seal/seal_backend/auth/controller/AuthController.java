@@ -7,6 +7,7 @@ import com.seal.seal_backend.auth.dto.request.RejectAccountRequest;
 import com.seal.seal_backend.auth.dto.response.AccountStatusResponse;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
 import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
+import com.seal.seal_backend.auth.dto.response.MeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
 import com.seal.seal_backend.auth.dto.response.RegisterResponse;
 import com.seal.seal_backend.auth.security.UserPrincipal;
@@ -46,6 +47,14 @@ public class AuthController {
     @GetMapping("/ping")
     public ApiResponse<String> ping() {
         return ApiResponse.ok("Auth module is alive");
+    }
+
+    @GetMapping("/me")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Get current user profile (FR-AUTH-05)",
+               description = "Returns the authenticated user's profile. Requires valid Bearer token.")
+    public ApiResponse<MeResponse> me(@CurrentUser UserPrincipal user) {
+        return ApiResponse.ok(authService.getCurrentUser(user.getId()));
     }
 
     @PostMapping("/register")
