@@ -468,6 +468,56 @@ class AuthServiceImplTest {
         }
     }
 
+    // ─────────────────────── LIST BY STATUS ──────────────────────────────
+
+    @Nested
+    class ListAccountsByStatus {
+
+        @Test
+        void listActive_returnsMappedPage() {
+            User active = userWithStatus("active@x.com", UserStatus.ACTIVE);
+            active.setId(11L);
+            Page<User> page = new PageImpl<>(List.of(active), PageRequest.of(0, 20), 1);
+            when(userRepository.findAllByStatus(eq(UserStatus.ACTIVE), any(Pageable.class)))
+                    .thenReturn(page);
+
+            PageResponse<PendingAccountResponse> result =
+                    authService.listAccountsByStatus(UserStatus.ACTIVE, PageRequest.of(0, 20));
+
+            assertThat(result.content()).hasSize(1);
+            assertThat(result.content().get(0).id()).isEqualTo(11L);
+            verify(userRepository).findAllByStatus(eq(UserStatus.ACTIVE), any(Pageable.class));
+        }
+
+        @Test
+        void listRejected_returnsMappedPage() {
+            User rejected = userWithStatus("rej@x.com", UserStatus.REJECTED);
+            rejected.setId(22L);
+            Page<User> page = new PageImpl<>(List.of(rejected), PageRequest.of(0, 10), 1);
+            when(userRepository.findAllByStatus(eq(UserStatus.REJECTED), any(Pageable.class)))
+                    .thenReturn(page);
+
+            PageResponse<PendingAccountResponse> result =
+                    authService.listAccountsByStatus(UserStatus.REJECTED, PageRequest.of(0, 10));
+
+            assertThat(result.content()).hasSize(1);
+            assertThat(result.content().get(0).id()).isEqualTo(22L);
+        }
+
+        @Test
+        void emptyPage_returnsZeroContent() {
+            Page<User> empty = new PageImpl<>(List.of(), PageRequest.of(0, 20), 0);
+            when(userRepository.findAllByStatus(eq(UserStatus.PENDING), any(Pageable.class)))
+                    .thenReturn(empty);
+
+            PageResponse<PendingAccountResponse> result =
+                    authService.listAccountsByStatus(UserStatus.PENDING, PageRequest.of(0, 20));
+
+            assertThat(result.content()).isEmpty();
+            assertThat(result.totalElements()).isZero();
+        }
+    }
+
     // ─────────────────────── GET CURRENT USER ────────────────────────────
 
     @Nested

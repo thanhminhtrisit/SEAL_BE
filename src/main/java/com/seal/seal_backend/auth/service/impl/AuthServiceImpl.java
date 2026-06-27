@@ -204,6 +204,14 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public PageResponse<PendingAccountResponse> listAccountsByStatus(UserStatus status, Pageable pageable) {
+        return PageResponse.of(
+                userRepository.findAllByStatus(status, pageable)
+                        .map(PendingAccountResponse::from));
+    }
+
+    @Override
     @Transactional
     public GuestJudgeResponse createGuestJudge(CreateGuestJudgeRequest req, Long creatorId) {
         userRepository.findByEmail(req.email()).ifPresent(existing -> {

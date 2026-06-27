@@ -3,7 +3,6 @@ package com.seal.seal_backend.budget;
 import com.seal.seal_backend.budget.dto.request.CreateBudgetItemRequest;
 import com.seal.seal_backend.budget.dto.request.CreateBudgetRequest;
 import com.seal.seal_backend.budget.dto.request.UpdateBudgetRequest;
-import com.seal.seal_backend.domain.enums.BudgetStatus;
 import com.seal.seal_backend.budget.dto.response.BudgetResponse;
 import com.seal.seal_backend.budget.service.impl.BudgetServiceImpl;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
