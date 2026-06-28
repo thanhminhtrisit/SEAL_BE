@@ -7,6 +7,9 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import java.util.List;
 
+import java.util.List;
+import java.util.Optional;
+
 @Repository
 public interface RoundRepository extends JpaRepository<Round, Long> {
     List<Round> findByEventIdOrderByOrderNumber(Long eventId);
@@ -19,4 +22,8 @@ public interface RoundRepository extends JpaRepository<Round, Long> {
         List<Round> nextRounds = findNextRounds(eventId, currentOrderNumber);
         return nextRounds.isEmpty() ? null : nextRounds.get(0);
     }
+
+    List<Round> findByEventIdOrderByOrderNumberAsc(Long eventId);
+
+    Optional<Round> findByEventIdAndOrderNumber(Long eventId, Integer orderNumber);
 }

@@ -20,4 +20,8 @@ public interface RankingRepository extends JpaRepository<Ranking, Long> {
     @Modifying
     @Query("DELETE FROM Ranking r WHERE r.round.id = :roundId")
     void deleteByRoundId(@Param("roundId") Long roundId);
+
+    boolean existsByRoundIdAndTeamIdAndIsPromotedTrue(Long roundId, Long teamId);
+
+    boolean existsByRoundIdAndTeamId(Long roundId, Long teamId);
 }

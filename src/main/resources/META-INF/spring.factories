@@ -1,2 +1,1 @@
-org.springframework.boot.env.EnvironmentPostProcessor=\
-  com.seal.seal_backend.config.DotEnvPostProcessor
+org.springframework.boot.env.EnvironmentPostProcessor=com.seal.seal_backend.config.DotEnvPostProcessor
