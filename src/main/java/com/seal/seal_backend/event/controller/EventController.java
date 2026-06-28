@@ -124,6 +124,56 @@ public class EventController {
         return ApiResponse.ok(eventService.getCriteriaSet(eventId, setId));
     }
 
+    @PatchMapping("/{eventId}/criteria-sets/{setId}")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Update criteria set name/description (DRAFT or REJECTED only)")
+    public ApiResponse<CriteriaSetResponse> updateCriteriaSet(
+            @PathVariable Long eventId,
+            @PathVariable Long setId,
+            @Valid @RequestBody UpdateCriteriaSetRequest req) {
+        return ApiResponse.ok(eventService.updateCriteriaSet(eventId, setId, req));
+    }
+
+    @PutMapping("/{eventId}/criteria-sets/{setId}/criteria")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Replace all criteria in a set (BR-EVT-03: weights must sum to 100, DRAFT or REJECTED only)")
+    public ApiResponse<CriteriaSetResponse> replaceCriteria(
+            @PathVariable Long eventId,
+            @PathVariable Long setId,
+            @Valid @RequestBody ReplaceCriteriaRequest req) {
+        return ApiResponse.ok(eventService.replaceCriteria(eventId, setId, req));
+    }
+
+    @DeleteMapping("/{eventId}/criteria-sets/{setId}")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Delete a criteria set and its criteria (DRAFT or REJECTED only)")
+    public ApiResponse<Void> deleteCriteriaSet(
+            @PathVariable Long eventId, @PathVariable Long setId) {
+        eventService.deleteCriteriaSet(eventId, setId);
+        return ApiResponse.ok("Criteria set deleted.", null);
+    }
+
+    @DeleteMapping("/{eventId}/criteria-sets/{setId}/criteria/{criterionId}")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Delete a single criterion from a set (DRAFT or REJECTED only)")
+    public ApiResponse<CriteriaSetResponse> deleteCriterion(
+            @PathVariable Long eventId,
+            @PathVariable Long setId,
+            @PathVariable Long criterionId) {
+        return ApiResponse.ok(eventService.deleteCriterion(eventId, setId, criterionId));
+    }
+
+    // ─── Round delete ─────────────────────────────────────────────────────────
+
+    @DeleteMapping("/{eventId}/rounds/{roundId}")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Delete a round (DRAFT or REJECTED only; 409 if judge/criteria attached)")
+    public ApiResponse<Void> deleteRound(
+            @PathVariable Long eventId, @PathVariable Long roundId) {
+        eventService.deleteRound(eventId, roundId);
+        return ApiResponse.ok("Round deleted.", null);
+    }
+
     // ─── Category (FR-EVT-04) ─────────────────────────────────────────────────
 
     @PostMapping("/{eventId}/categories")
@@ -157,6 +207,15 @@ public class EventController {
             @PathVariable Long categoryId,
             @Valid @RequestBody UpdateCategoryRequest req) {
         return ApiResponse.ok(eventService.updateCategory(eventId, categoryId, req));
+    }
+
+    @DeleteMapping("/{eventId}/categories/{categoryId}")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Delete category (DRAFT or REJECTED only; 409 if teams are registered)")
+    public ApiResponse<Void> deleteCategory(
+            @PathVariable Long eventId, @PathVariable Long categoryId) {
+        eventService.deleteCategory(eventId, categoryId);
+        return ApiResponse.ok("Category deleted.", null);
     }
 
     // ─── Submit (FR-EVT-07) ───────────────────────────────────────────────────

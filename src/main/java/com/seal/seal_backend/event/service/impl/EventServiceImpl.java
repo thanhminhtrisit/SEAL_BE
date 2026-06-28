@@ -12,6 +12,7 @@ import com.seal.seal_backend.domain.enums.EventType;
 import com.seal.seal_backend.domain.enums.RoundStatus;
 import com.seal.seal_backend.domain.repository.*;
 import com.seal.seal_backend.event.dto.request.*;
+import com.seal.seal_backend.domain.repository.TeamRepository;
 import com.seal.seal_backend.event.dto.response.*;
 import com.seal.seal_backend.event.service.EventService;
 import com.seal.seal_backend.shared.contract.JudgeQueryPort;
@@ -37,6 +38,7 @@ public class EventServiceImpl implements EventService {
     private final CategoryRepository categoryRepository;
     private final JudgeAssignmentRepository judgeAssignmentRepository;
     private final EventBudgetRepository eventBudgetRepository;
+    private final TeamRepository teamRepository;
     private final AuditPublisher auditPublisher;
     private final JudgeQueryPort judgeQueryPort;
 
@@ -328,6 +330,108 @@ public class EventServiceImpl implements EventService {
         return CriteriaSetResponse.from(cs, criteria);
     }
 
+    @Override
+    @Transactional
+    public CriteriaSetResponse updateCriteriaSet(Long eventId, Long setId, UpdateCriteriaSetRequest req) {
+        Event event = findEvent(eventId);
+        validateConfigEditable(event);
+        CriteriaSet cs = findCriteriaSet(setId, eventId);
+
+        if (req.name() != null && !req.name().isBlank()) cs.setName(req.name());
+        if (req.description() != null) cs.setDescription(req.description());
+        cs = criteriaSetRepository.save(cs);
+
+        List<ScoringCriterion> criteria =
+                scoringCriterionRepository.findByCriteriaSetIdOrderByDisplayOrder(setId);
+        return CriteriaSetResponse.from(cs, criteria);
+    }
+
+    @Override
+    @Transactional
+    public CriteriaSetResponse replaceCriteria(Long eventId, Long setId, ReplaceCriteriaRequest req) {
+        Event event = findEvent(eventId);
+        validateConfigEditable(event);
+        CriteriaSet cs = findCriteriaSet(setId, eventId);
+
+        BigDecimal totalWeight = req.criteria().stream()
+                .map(AddCriterionRequest::weight)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (totalWeight.compareTo(new BigDecimal("100")) != 0) {
+            throw new BusinessRuleException("BR-EVT-03",
+                    "Sum of criterion weights must equal 100, got: " + totalWeight);
+        }
+
+        List<ScoringCriterion> existing =
+                scoringCriterionRepository.findByCriteriaSetIdOrderByDisplayOrder(setId);
+        scoringCriterionRepository.deleteAll(existing);
+
+        List<ScoringCriterion> newCriteria = req.criteria().stream().map(c -> {
+            ScoringCriterion sc = new ScoringCriterion();
+            sc.setCriteriaSet(cs);
+            sc.setName(c.name());
+            sc.setDescription(c.description());
+            sc.setMaxScore(c.maxScore());
+            sc.setWeight(c.weight());
+            sc.setDisplayOrder(c.displayOrder());
+            sc.setIsActive(true);
+            return scoringCriterionRepository.save(sc);
+        }).toList();
+
+        return CriteriaSetResponse.from(cs, newCriteria);
+    }
+
+    @Override
+    @Transactional
+    public void deleteCriteriaSet(Long eventId, Long setId) {
+        Event event = findEvent(eventId);
+        validateConfigEditable(event);
+        CriteriaSet cs = findCriteriaSet(setId, eventId);
+
+        List<ScoringCriterion> criteria =
+                scoringCriterionRepository.findByCriteriaSetIdOrderByDisplayOrder(setId);
+        scoringCriterionRepository.deleteAll(criteria);
+        criteriaSetRepository.delete(cs);
+    }
+
+    @Override
+    @Transactional
+    public CriteriaSetResponse deleteCriterion(Long eventId, Long setId, Long criterionId) {
+        Event event = findEvent(eventId);
+        validateConfigEditable(event);
+        CriteriaSet cs = findCriteriaSet(setId, eventId);
+
+        ScoringCriterion criterion = scoringCriterionRepository.findById(criterionId)
+                .filter(c -> c.getCriteriaSet().getId().equals(setId))
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Criterion " + criterionId + " not found in criteria set " + setId));
+        scoringCriterionRepository.delete(criterion);
+
+        List<ScoringCriterion> remaining =
+                scoringCriterionRepository.findByCriteriaSetIdOrderByDisplayOrder(setId);
+        return CriteriaSetResponse.from(cs, remaining);
+    }
+
+    // ─── Round delete ─────────────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public void deleteRound(Long eventId, Long roundId) {
+        Event event = findEvent(eventId);
+        validateConfigEditable(event);
+        findRound(roundId, eventId);
+
+        if (criteriaSetRepository.existsByRoundId(roundId)) {
+            throw new BusinessRuleException("BR-EVT-12",
+                    "Cannot delete round " + roundId + ": it has attached criteria sets. Remove them first.");
+        }
+        if (judgeAssignmentRepository.existsByRoundId(roundId)) {
+            throw new BusinessRuleException("BR-EVT-12",
+                    "Cannot delete round " + roundId + ": it has judge assignments. Revoke them first.");
+        }
+
+        roundRepository.deleteById(roundId);
+    }
+
     // ─── Category (FR-EVT-04) ─────────────────────────────────────────────────
 
     @Override
@@ -395,6 +499,21 @@ public class EventServiceImpl implements EventService {
         }
 
         return CategoryResponse.from(categoryRepository.save(cat));
+    }
+
+    @Override
+    @Transactional
+    public void deleteCategory(Long eventId, Long categoryId) {
+        Event event = findEvent(eventId);
+        validateConfigEditable(event);
+        findCategory(categoryId, eventId);
+
+        if (teamRepository.existsByCategoryId(categoryId)) {
+            throw new BusinessRuleException("BR-EVT-13",
+                    "Cannot delete category " + categoryId + ": teams are registered to it.");
+        }
+
+        categoryRepository.deleteById(categoryId);
     }
 
     // ─── Judge Assignment ─────────────────────────────────────────────────────
@@ -550,6 +669,23 @@ public class EventServiceImpl implements EventService {
             throw new BusinessRuleException("BR-EVT-07",
                     "Event " + event.getId() + " is locked for editing while pending approval.");
         }
+    }
+
+    /** Stricter guard for criteria/round/category: only DRAFT and REJECTED allow config edits. */
+    private void validateConfigEditable(Event event) {
+        EventStatus s = event.getStatus();
+        if (s != EventStatus.DRAFT && s != EventStatus.REJECTED) {
+            throw new BusinessRuleException("BR-EVT-07",
+                    "Event " + event.getId() + " cannot be edited in status " + s
+                    + ". Configuration is locked after approval.");
+        }
+    }
+
+    private CriteriaSet findCriteriaSet(Long setId, Long eventId) {
+        return criteriaSetRepository.findById(setId)
+                .filter(cs -> cs.getEvent() != null && cs.getEvent().getId().equals(eventId))
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "CriteriaSet " + setId + " not found for event " + eventId));
     }
 
     private Event findEvent(Long id) {

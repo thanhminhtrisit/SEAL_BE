@@ -12,7 +12,9 @@ import com.seal.seal_backend.auth.service.impl.AuthServiceImpl;
 import com.seal.seal_backend.common.api.PageResponse;
 import com.seal.seal_backend.common.audit.AuditAction;
 import com.seal.seal_backend.common.audit.AuditPublisher;
+import com.seal.seal_backend.auth.dto.response.MeResponse;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
+import com.seal.seal_backend.common.exception.ResourceNotFoundException;
 import com.seal.seal_backend.domain.entity.Role;
 import com.seal.seal_backend.domain.entity.User;
 import com.seal.seal_backend.domain.enums.AccountType;
@@ -463,6 +465,97 @@ class AuthServiceImplTest {
                     new CreateGuestJudgeRequest("taken@ext.com", "Name", null), 1L))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-USR-01");
+        }
+    }
+
+    // ─────────────────────── LIST BY STATUS ──────────────────────────────
+
+    @Nested
+    class ListAccountsByStatus {
+
+        @Test
+        void listActive_returnsMappedPage() {
+            User active = userWithStatus("active@x.com", UserStatus.ACTIVE);
+            active.setId(11L);
+            Page<User> page = new PageImpl<>(List.of(active), PageRequest.of(0, 20), 1);
+            when(userRepository.findAllByStatus(eq(UserStatus.ACTIVE), any(Pageable.class)))
+                    .thenReturn(page);
+
+            PageResponse<PendingAccountResponse> result =
+                    authService.listAccountsByStatus(UserStatus.ACTIVE, PageRequest.of(0, 20));
+
+            assertThat(result.content()).hasSize(1);
+            assertThat(result.content().get(0).id()).isEqualTo(11L);
+            verify(userRepository).findAllByStatus(eq(UserStatus.ACTIVE), any(Pageable.class));
+        }
+
+        @Test
+        void listRejected_returnsMappedPage() {
+            User rejected = userWithStatus("rej@x.com", UserStatus.REJECTED);
+            rejected.setId(22L);
+            Page<User> page = new PageImpl<>(List.of(rejected), PageRequest.of(0, 10), 1);
+            when(userRepository.findAllByStatus(eq(UserStatus.REJECTED), any(Pageable.class)))
+                    .thenReturn(page);
+
+            PageResponse<PendingAccountResponse> result =
+                    authService.listAccountsByStatus(UserStatus.REJECTED, PageRequest.of(0, 10));
+
+            assertThat(result.content()).hasSize(1);
+            assertThat(result.content().get(0).id()).isEqualTo(22L);
+        }
+
+        @Test
+        void emptyPage_returnsZeroContent() {
+            Page<User> empty = new PageImpl<>(List.of(), PageRequest.of(0, 20), 0);
+            when(userRepository.findAllByStatus(eq(UserStatus.PENDING), any(Pageable.class)))
+                    .thenReturn(empty);
+
+            PageResponse<PendingAccountResponse> result =
+                    authService.listAccountsByStatus(UserStatus.PENDING, PageRequest.of(0, 20));
+
+            assertThat(result.content()).isEmpty();
+            assertThat(result.totalElements()).isZero();
+        }
+    }
+
+    // ─────────────────────── GET CURRENT USER ────────────────────────────
+
+    @Nested
+    class GetCurrentUser {
+
+        @Test
+        void existingUser_returnsMeResponse() {
+            Role coordRole = new Role();
+            coordRole.setCode("COORDINATOR");
+
+            User user = new User();
+            user.setId(7L);
+            user.setEmail("coord@seal.local");
+            user.setFullName("Test Coordinator");
+            user.setPhone("0901234567");
+            user.setPrimaryRole(coordRole);
+            user.setAccountType(AccountType.STAFF);
+            user.setStatus(UserStatus.ACTIVE);
+            user.setIsFptStudent(false);
+
+            when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+
+            MeResponse resp = authService.getCurrentUser(7L);
+
+            assertThat(resp.id()).isEqualTo(7L);
+            assertThat(resp.email()).isEqualTo("coord@seal.local");
+            assertThat(resp.fullName()).isEqualTo("Test Coordinator");
+            assertThat(resp.roleCode()).isEqualTo("COORDINATOR");
+            assertThat(resp.accountType()).isEqualTo(AccountType.STAFF);
+            assertThat(resp.status()).isEqualTo(UserStatus.ACTIVE);
+        }
+
+        @Test
+        void unknownUserId_throws_ResourceNotFoundException() {
+            when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> authService.getCurrentUser(999L))
+                    .isInstanceOf(ResourceNotFoundException.class);
         }
     }
 

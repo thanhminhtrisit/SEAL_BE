@@ -5,6 +5,7 @@ import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
 import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
+import com.seal.seal_backend.auth.dto.response.MeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
 import com.seal.seal_backend.auth.security.JwtTokenProvider;
 import com.seal.seal_backend.auth.security.UserPrincipal;
@@ -203,6 +204,14 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public PageResponse<PendingAccountResponse> listAccountsByStatus(UserStatus status, Pageable pageable) {
+        return PageResponse.of(
+                userRepository.findAllByStatus(status, pageable)
+                        .map(PendingAccountResponse::from));
+    }
+
+    @Override
     @Transactional
     public GuestJudgeResponse createGuestJudge(CreateGuestJudgeRequest req, Long creatorId) {
         userRepository.findByEmail(req.email()).ifPresent(existing -> {
@@ -255,6 +264,14 @@ public class AuthServiceImpl implements AuthService {
             char tmp = chars[i]; chars[i] = chars[j]; chars[j] = tmp;
         }
         return new String(chars);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public MeResponse getCurrentUser(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+        return MeResponse.from(user);
     }
 
     private void validatePasswordStrength(String password) {

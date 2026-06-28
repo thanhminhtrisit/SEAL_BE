@@ -7,12 +7,14 @@ import com.seal.seal_backend.auth.dto.request.RejectAccountRequest;
 import com.seal.seal_backend.auth.dto.response.AccountStatusResponse;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
 import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
+import com.seal.seal_backend.auth.dto.response.MeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
 import com.seal.seal_backend.auth.dto.response.RegisterResponse;
 import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.auth.service.AuthService;
 import com.seal.seal_backend.common.api.ApiResponse;
 import com.seal.seal_backend.common.api.PageResponse;
+import com.seal.seal_backend.common.exception.BusinessRuleException;
 import com.seal.seal_backend.common.security.CurrentUser;
 import com.seal.seal_backend.domain.enums.UserStatus;
 import com.seal.seal_backend.notification.service.NotificationService;
@@ -46,6 +48,14 @@ public class AuthController {
     @GetMapping("/ping")
     public ApiResponse<String> ping() {
         return ApiResponse.ok("Auth module is alive");
+    }
+
+    @GetMapping("/me")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Get current user profile (FR-AUTH-05)",
+               description = "Returns the authenticated user's profile. Requires valid Bearer token.")
+    public ApiResponse<MeResponse> me(@CurrentUser UserPrincipal user) {
+        return ApiResponse.ok(authService.getCurrentUser(user.getId()));
     }
 
     @PostMapping("/register")
@@ -88,6 +98,28 @@ public class AuthController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.ok(authService.listPendingAccounts(PageRequest.of(page, size)));
+    }
+
+    @GetMapping("/accounts")
+    @PreAuthorize("hasAnyRole('COORDINATOR','ADMIN')")
+    @Operation(summary = "List accounts by status (FR-AUTH-08)",
+               description = "Paginated. Accepts PENDING, ACTIVE, REJECTED, INACTIVE, LOCKED. 'APPROVED' is accepted as an alias for ACTIVE.")
+    public ApiResponse<PageResponse<PendingAccountResponse>> listAccountsByStatus(
+            @RequestParam(defaultValue = "PENDING") String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.ok(authService.listAccountsByStatus(
+                resolveStatus(status), PageRequest.of(page, size)));
+    }
+
+    private UserStatus resolveStatus(String status) {
+        String upper = status.toUpperCase();
+        if ("APPROVED".equals(upper)) return UserStatus.ACTIVE;
+        try {
+            return UserStatus.valueOf(upper);
+        } catch (IllegalArgumentException e) {
+            throw new BusinessRuleException("BR-USR-06", "Unknown account status: " + status);
+        }
     }
 
     @PostMapping("/accounts/{userId}/approve")

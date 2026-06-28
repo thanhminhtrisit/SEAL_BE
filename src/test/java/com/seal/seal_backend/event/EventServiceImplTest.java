@@ -11,6 +11,7 @@ import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.domain.enums.EventType;
 import com.seal.seal_backend.domain.enums.TermType;
 import com.seal.seal_backend.domain.repository.*;
+import com.seal.seal_backend.domain.enums.RoundStatus;
 import com.seal.seal_backend.event.dto.request.*;
 import com.seal.seal_backend.event.dto.response.*;
 import com.seal.seal_backend.event.service.impl.EventServiceImpl;
@@ -45,6 +46,7 @@ class EventServiceImplTest {
     @Mock CategoryRepository categoryRepository;
     @Mock JudgeAssignmentRepository judgeAssignmentRepository;
     @Mock EventBudgetRepository eventBudgetRepository;
+    @Mock TeamRepository teamRepository;
     @Mock AuditPublisher auditPublisher;
     @Mock JudgeQueryPort judgeQueryPort;
 
@@ -425,6 +427,199 @@ class EventServiceImplTest {
 
             assertThatThrownBy(() -> service.addRound(1L,
                     new CreateRoundRequest("R1", 1, null, null, false)))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
+        }
+    }
+
+    // ─── Criteria CRUD ────────────────────────────────────────────────────────
+
+    @Nested
+    class CriteriaSetMutations {
+
+        private CriteriaSet cs;
+        private ScoringCriterion crit;
+
+        @org.junit.jupiter.api.BeforeEach
+        void setup() {
+            cs = new CriteriaSet();
+            cs.setId(5L);
+            cs.setName("Original");
+            cs.setEvent(sampleEvent);
+
+            crit = new ScoringCriterion();
+            crit.setId(1L);
+            crit.setCriteriaSet(cs);
+            crit.setWeight(new BigDecimal("100"));
+            crit.setDisplayOrder(1);
+        }
+
+        @Test
+        void updateCriteriaSet_approvedEvent_throws_BR_EVT_07() {
+            sampleEvent.setStatus(EventStatus.APPROVED);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.updateCriteriaSet(1L, 5L,
+                    new UpdateCriteriaSetRequest("New Name", null)))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
+        }
+
+        @Test
+        void updateCriteriaSet_draft_updatesNameAndDescription() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(criteriaSetRepository.findById(5L)).thenReturn(Optional.of(cs));
+            when(criteriaSetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(scoringCriterionRepository.findByCriteriaSetIdOrderByDisplayOrder(5L))
+                    .thenReturn(List.of(crit));
+
+            CriteriaSetResponse resp = service.updateCriteriaSet(1L, 5L,
+                    new UpdateCriteriaSetRequest("New Name", "desc"));
+
+            assertThat(resp.name()).isEqualTo("New Name");
+        }
+
+        @Test
+        void replaceCriteria_badWeight_throws_BR_EVT_03() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(criteriaSetRepository.findById(5L)).thenReturn(Optional.of(cs));
+
+            ReplaceCriteriaRequest req = new ReplaceCriteriaRequest(List.of(
+                    new AddCriterionRequest("C1", null, new BigDecimal("10"), new BigDecimal("50"), 1)
+            ));
+            assertThatThrownBy(() -> service.replaceCriteria(1L, 5L, req))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-03");
+        }
+
+        @Test
+        void deleteCriteriaSet_draft_deletesSetAndCriteria() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(criteriaSetRepository.findById(5L)).thenReturn(Optional.of(cs));
+            when(scoringCriterionRepository.findByCriteriaSetIdOrderByDisplayOrder(5L))
+                    .thenReturn(List.of(crit));
+
+            service.deleteCriteriaSet(1L, 5L);
+
+            verify(scoringCriterionRepository).deleteAll(List.of(crit));
+            verify(criteriaSetRepository).delete(cs);
+        }
+
+        @Test
+        void deleteCriteriaSet_approvedEvent_throws_BR_EVT_07() {
+            sampleEvent.setStatus(EventStatus.OPEN);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.deleteCriteriaSet(1L, 5L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
+        }
+    }
+
+    // ─── Delete Round ─────────────────────────────────────────────────────────
+
+    @Nested
+    class DeleteRound {
+
+        private Round round;
+
+        @org.junit.jupiter.api.BeforeEach
+        void setup() {
+            round = new Round();
+            round.setId(10L);
+            round.setEvent(sampleEvent);
+            round.setStatus(RoundStatus.DRAFT);
+        }
+
+        @Test
+        void deleteRound_hasCriteriaSet_throws_BR_EVT_12() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findById(10L)).thenReturn(Optional.of(round));
+            when(criteriaSetRepository.existsByRoundId(10L)).thenReturn(true);
+
+            assertThatThrownBy(() -> service.deleteRound(1L, 10L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-12");
+        }
+
+        @Test
+        void deleteRound_hasJudges_throws_BR_EVT_12() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findById(10L)).thenReturn(Optional.of(round));
+            when(criteriaSetRepository.existsByRoundId(10L)).thenReturn(false);
+            when(judgeAssignmentRepository.existsByRoundId(10L)).thenReturn(true);
+
+            assertThatThrownBy(() -> service.deleteRound(1L, 10L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-12");
+        }
+
+        @Test
+        void deleteRound_noDependencies_deletesSuccessfully() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findById(10L)).thenReturn(Optional.of(round));
+            when(criteriaSetRepository.existsByRoundId(10L)).thenReturn(false);
+            when(judgeAssignmentRepository.existsByRoundId(10L)).thenReturn(false);
+
+            service.deleteRound(1L, 10L);
+
+            verify(roundRepository).deleteById(10L);
+        }
+
+        @Test
+        void deleteRound_approvedEvent_throws_BR_EVT_07() {
+            sampleEvent.setStatus(EventStatus.IN_PROGRESS);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.deleteRound(1L, 10L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
+        }
+    }
+
+    // ─── Delete Category ──────────────────────────────────────────────────────
+
+    @Nested
+    class DeleteCategory {
+
+        private Category category;
+
+        @org.junit.jupiter.api.BeforeEach
+        void setup() {
+            category = new Category();
+            category.setId(20L);
+            category.setEvent(sampleEvent);
+            category.setIsActive(true);
+        }
+
+        @Test
+        void deleteCategory_teamsRegistered_throws_BR_EVT_13() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(20L)).thenReturn(Optional.of(category));
+            when(teamRepository.existsByCategoryId(20L)).thenReturn(true);
+
+            assertThatThrownBy(() -> service.deleteCategory(1L, 20L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-13");
+        }
+
+        @Test
+        void deleteCategory_noTeams_deletesSuccessfully() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(20L)).thenReturn(Optional.of(category));
+            when(teamRepository.existsByCategoryId(20L)).thenReturn(false);
+
+            service.deleteCategory(1L, 20L);
+
+            verify(categoryRepository).deleteById(20L);
+        }
+
+        @Test
+        void deleteCategory_approvedEvent_throws_BR_EVT_07() {
+            sampleEvent.setStatus(EventStatus.APPROVED);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.deleteCategory(1L, 20L))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
         }

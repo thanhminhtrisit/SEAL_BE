@@ -19,4 +19,6 @@ public interface JudgeAssignmentRepository extends JpaRepository<JudgeAssignment
     @Query("SELECT ja.judge.id FROM JudgeAssignment ja WHERE ja.round.id = :roundId " +
            "AND ja.status = com.seal.seal_backend.domain.enums.AssignmentStatus.ACTIVE")
     List<Long> findJudgeIdsByRoundId(@Param("roundId") Long roundId);
+
+    boolean existsByRoundId(Long roundId);
 }

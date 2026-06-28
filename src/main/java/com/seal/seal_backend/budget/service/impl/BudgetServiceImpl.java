@@ -3,6 +3,7 @@ package com.seal.seal_backend.budget.service.impl;
 import com.seal.seal_backend.budget.dto.request.CreateBudgetItemRequest;
 import com.seal.seal_backend.budget.dto.request.CreateBudgetRequest;
 import com.seal.seal_backend.budget.dto.request.UpdateBudgetItemRequest;
+import com.seal.seal_backend.budget.dto.request.UpdateBudgetRequest;
 import com.seal.seal_backend.budget.dto.response.BudgetCategoryResponse;
 import com.seal.seal_backend.budget.dto.response.BudgetItemResponse;
 import com.seal.seal_backend.budget.dto.response.BudgetResponse;
@@ -63,6 +64,24 @@ public class BudgetServiceImpl implements BudgetService {
         List<BudgetItemResponse> items = budgetItemRepository.findByBudgetId(budget.getId())
                 .stream().map(BudgetItemResponse::from).toList();
         return BudgetResponse.from(budget, items);
+    }
+
+    // ─── PATCH budget header ──────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public BudgetResponse patchBudget(Long eventId, UpdateBudgetRequest req) {
+        validateNotPending(findEvent(eventId));
+        EventBudget budget = findBudgetForEvent(eventId);
+
+        if (req.currency() != null && !req.currency().isBlank()) {
+            budget.setCurrency(req.currency());
+        }
+        if (req.status() != null) {
+            budget.setStatus(req.status());
+        }
+        budget = eventBudgetRepository.save(budget);
+        return buildResponse(budget);
     }
 
     // ─── FR-BGT-02: Add item ──────────────────────────────────────────────────
