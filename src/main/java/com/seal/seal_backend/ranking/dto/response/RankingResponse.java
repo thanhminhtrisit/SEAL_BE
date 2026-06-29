@@ -11,6 +11,4 @@ public record RankingResponse (
     Double totalScore,
     Integer rankPosition,
     Boolean isPromoted
-){
-
-}
+){}

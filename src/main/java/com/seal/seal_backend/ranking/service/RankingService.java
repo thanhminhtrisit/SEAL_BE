@@ -1,24 +1,25 @@
 package com.seal.seal_backend.ranking.service;
 
+import com.seal.seal_backend.ranking.dto.response.CategoryResponse;
+import com.seal.seal_backend.ranking.dto.response.DisqualifiedTeamResponse;
 import com.seal.seal_backend.ranking.dto.response.RankingResponse;
+import com.seal.seal_backend.ranking.dto.response.ScoreBreakdownResponse;
+import com.seal.seal_backend.ranking.service.impl.RankingServiceImpl;
 
 import java.util.List;
-import java.util.Map;
 
 public interface RankingService {
-    /**
-     * Kích hoạt tính toán điểm và xếp hạng (Áp dụng BR-RNK-01, 02, 04, 05)
-     */
-    List<RankingResponse> computeRankingForRound(Long roundId, Long userId);
+    List<RankingResponse> computeRankingForRound(Long roundId, Long categoryId, Long userId);
 
-    /**
-     * Lấy danh sách kết quả xếp hạng
-     */
     List<RankingResponse> getRankingsByRound(Long roundId);
+
+    List<CategoryResponse> getCategoriesByEvent(Long eventId);
 
     void disqualifyTeam(Long teamId, String reason, Long userId);
 
-    List<Map<String, Object>> getDisqualifiedTeams(Long eventId);
+    List<DisqualifiedTeamResponse> getDisqualifiedTeams(Long eventId);
+
+    List<ScoreBreakdownResponse> getScoreBreakdown(Long teamId, Long roundId);
 
     void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds);
 }
