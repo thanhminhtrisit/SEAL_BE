@@ -404,6 +404,108 @@ class EventServiceImplTest {
         }
     }
 
+    // ─── Approve / Reject Event (BR-GOV-02) ──────────────────────────────────
+
+    @Nested
+    class ApproveRejectEvent {
+
+        private User superCoord;
+
+        @org.junit.jupiter.api.BeforeEach
+        void setup() {
+            superCoord = new User();
+            superCoord.setId(99L);
+            superCoord.setEmail("super@seal.local");
+
+            sampleEvent.setStatus(EventStatus.PENDING_APPROVAL);
+        }
+
+        // ── approve ──────────────────────────────────────────────────────────
+
+        @Test
+        void approve_pendingEvent_setsApprovedAndAudits() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(userRepository.findById(99L)).thenReturn(Optional.of(superCoord));
+            when(eventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            EventResponse resp = service.approveEvent(1L, 99L);
+
+            assertThat(resp.status()).isEqualTo(EventStatus.APPROVED);
+            verify(eventRepository).save(argThat(e ->
+                    e.getStatus() == EventStatus.APPROVED
+                    && e.getApprovedBy() != null
+                    && e.getApprovedAt() != null));
+            verify(auditPublisher).log(eq(superCoord), eq(AuditAction.EVENT_APPROVED),
+                    eq("EVENT"), eq(1L), any(), any(), isNull(), isNull());
+        }
+
+        @Test
+        void approve_notPending_throws_BR_GOV_01() {
+            sampleEvent.setStatus(EventStatus.DRAFT);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.approveEvent(1L, 99L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-GOV-01");
+        }
+
+        @Test
+        void approve_sameAsOwner_throws_BR_GOV_02() {
+            // sampleUser (id=3) is ownerCoordinator; approverId=3 → separation of duties violation
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.approveEvent(1L, 3L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-GOV-02");
+        }
+
+        // ── reject ───────────────────────────────────────────────────────────
+
+        @Test
+        void reject_pendingEvent_setsRejectedAndAudits() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(userRepository.findById(99L)).thenReturn(Optional.of(superCoord));
+            when(eventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            EventResponse resp = service.rejectEvent(1L, 99L, "Incomplete criteria");
+
+            assertThat(resp.status()).isEqualTo(EventStatus.REJECTED);
+            verify(eventRepository).save(argThat(e ->
+                    e.getStatus() == EventStatus.REJECTED
+                    && "Incomplete criteria".equals(e.getRejectionReason())));
+            verify(auditPublisher).log(eq(superCoord), eq(AuditAction.EVENT_REJECTED),
+                    eq("EVENT"), eq(1L), any(), any(), eq("Incomplete criteria"), isNull());
+        }
+
+        @Test
+        void reject_notPending_throws_BR_GOV_01() {
+            sampleEvent.setStatus(EventStatus.APPROVED);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.rejectEvent(1L, 99L, "reason"))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-GOV-01");
+        }
+
+        @Test
+        void reject_sameAsOwner_throws_BR_GOV_02() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.rejectEvent(1L, 3L, "reason"))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-GOV-02");
+        }
+
+        @Test
+        void reject_blankReason_throws_BR_GOV_03() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThatThrownBy(() -> service.rejectEvent(1L, 99L, "  "))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-GOV-03");
+        }
+    }
+
     // ─── Pending Lock ─────────────────────────────────────────────────────────
 
     @Nested

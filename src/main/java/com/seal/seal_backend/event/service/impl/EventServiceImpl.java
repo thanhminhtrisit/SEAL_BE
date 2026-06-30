@@ -585,6 +585,74 @@ public class EventServiceImpl implements EventService {
                 .stream().map(JudgeAssignmentResponse::from).toList();
     }
 
+    // ─── Governance (BR-GOV-02): Super Coordinator approve/reject ────────────
+
+    @Override
+    @Transactional
+    public EventResponse approveEvent(Long eventId, Long approverId) {
+        Event event = findEvent(eventId);
+
+        if (event.getStatus() != EventStatus.PENDING_APPROVAL) {
+            throw new BusinessRuleException("BR-GOV-01",
+                    "Only PENDING_APPROVAL events can be approved. Current status: " + event.getStatus());
+        }
+
+        // BR-GOV-02: separation of duties — approver must differ from owner coordinator
+        if (event.getOwnerCoordinator().getId().equals(approverId)) {
+            throw new BusinessRuleException("BR-GOV-02",
+                    "The owner coordinator cannot approve their own event.");
+        }
+
+        User approver = userRepository.findById(approverId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + approverId));
+
+        String oldStatus = event.getStatus().name();
+        event.setStatus(EventStatus.APPROVED);
+        event.setApprovedBy(approver);
+        event.setApprovedAt(LocalDateTime.now());
+        Event saved = eventRepository.save(event);
+
+        auditPublisher.log(approver, AuditAction.EVENT_APPROVED, "EVENT", eventId,
+                "{\"status\":\"" + oldStatus + "\"}", "{\"status\":\"APPROVED\"}", null, null);
+
+        return EventResponse.from(saved);
+    }
+
+    @Override
+    @Transactional
+    public EventResponse rejectEvent(Long eventId, Long approverId, String reason) {
+        Event event = findEvent(eventId);
+
+        if (event.getStatus() != EventStatus.PENDING_APPROVAL) {
+            throw new BusinessRuleException("BR-GOV-01",
+                    "Only PENDING_APPROVAL events can be rejected. Current status: " + event.getStatus());
+        }
+
+        // BR-GOV-02: separation of duties
+        if (event.getOwnerCoordinator().getId().equals(approverId)) {
+            throw new BusinessRuleException("BR-GOV-02",
+                    "The owner coordinator cannot reject their own event.");
+        }
+
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessRuleException("BR-GOV-03",
+                    "A rejection reason is required.");
+        }
+
+        User approver = userRepository.findById(approverId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + approverId));
+
+        String oldStatus = event.getStatus().name();
+        event.setStatus(EventStatus.REJECTED);
+        event.setRejectionReason(reason);
+        Event saved = eventRepository.save(event);
+
+        auditPublisher.log(approver, AuditAction.EVENT_REJECTED, "EVENT", eventId,
+                "{\"status\":\"" + oldStatus + "\"}", "{\"status\":\"REJECTED\"}", reason, null);
+
+        return EventResponse.from(saved);
+    }
+
     // ─── Lifecycle (FR-EVT-07): post-APPROVED transitions ────────────────────
 
     @Override

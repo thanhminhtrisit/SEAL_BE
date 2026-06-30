@@ -231,6 +231,31 @@ public class EventController {
                 eventService.submitEvent(eventId, user.getId())));
     }
 
+    // ─── Governance (BR-GOV-02) ──────────────────────────────────────────────
+
+    @PostMapping("/{eventId}/approve")
+    @PreAuthorize("hasRole('SUPER_COORDINATOR')")
+    @Operation(summary = "Approve a PENDING_APPROVAL event (BR-GOV-02)",
+               description = "Transitions PENDING_APPROVAL → APPROVED. Approver must differ from the owner coordinator.")
+    public ResponseEntity<ApiResponse<EventResponse>> approveEvent(
+            @PathVariable Long eventId,
+            @CurrentUser UserPrincipal user) {
+        return ResponseEntity.ok(ApiResponse.ok("Event approved.",
+                eventService.approveEvent(eventId, user.getId())));
+    }
+
+    @PostMapping("/{eventId}/reject")
+    @PreAuthorize("hasRole('SUPER_COORDINATOR')")
+    @Operation(summary = "Reject a PENDING_APPROVAL event (BR-GOV-02)",
+               description = "Transitions PENDING_APPROVAL → REJECTED. Reason is mandatory. Approver must differ from the owner coordinator.")
+    public ResponseEntity<ApiResponse<EventResponse>> rejectEvent(
+            @PathVariable Long eventId,
+            @Valid @RequestBody RejectEventRequest req,
+            @CurrentUser UserPrincipal user) {
+        return ResponseEntity.ok(ApiResponse.ok("Event rejected.",
+                eventService.rejectEvent(eventId, user.getId(), req.reason())));
+    }
+
     // ─── Lifecycle (FR-EVT-07) ───────────────────────────────────────────────
 
     @PostMapping("/{eventId}/open")

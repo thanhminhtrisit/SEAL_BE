@@ -45,6 +45,10 @@ public interface EventService {
     // --- Submit (FR-EVT-07) ---
     EventResponse submitEvent(Long eventId, Long coordinatorId);
 
+    // --- Governance (BR-GOV-02): Super Coordinator approve/reject ---
+    EventResponse approveEvent(Long eventId, Long approverId);
+    EventResponse rejectEvent(Long eventId, Long approverId, String reason);
+
     // --- Lifecycle (FR-EVT-07): APPROVED → OPEN → IN_PROGRESS → COMPLETED → ARCHIVED ---
     EventResponse openEvent(Long eventId, Long coordinatorId);
     EventResponse startEvent(Long eventId, Long coordinatorId);
