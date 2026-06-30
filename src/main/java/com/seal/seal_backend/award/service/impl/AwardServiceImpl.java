@@ -28,10 +28,16 @@ public class AwardServiceImpl implements AwardService {
     @Override
     @Transactional
     public AwardResponse createAward(AwardCreateRequest request, Long userId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("Không thể xác thực danh tính Người điều phối (User ID is null). Vui lòng đăng nhập lại!");
+        }
+
         log.info("Coordinator (ID:{}) đang gán giải {} cho Team ID: {}", userId, request.awardType(), request.teamId());
 
         Event eventRef = new Event(); eventRef.setId(request.eventId());
         Team teamRef = new Team(); teamRef.setId(request.teamId());
+
+        // Bây giờ chắc chắn userId đã có giá trị thực
         User userRef = new User(); userRef.setId(userId);
 
         Ranking rankingRef = null;
@@ -85,18 +91,19 @@ public class AwardServiceImpl implements AwardService {
 
     @Transactional(readOnly = true)
     @Override
-    public List<Map<String, Object>> getEligibleTeamsForAward(Long eventId) {
+    public List<Map<String, Object>> getEligibleTeamsForAward(Long eventId, Long categoryId) {
+        // Sửa lại câu SQL để JOIN hoặc filter theo category_id
         String sql = "SELECT t.id AS teamId, t.name AS teamName, " +
                 "rk.rank_position AS rankPosition, rk.total_score AS totalScore " +
                 "FROM rankings rk " +
                 "JOIN teams t ON rk.team_id = t.id " +
                 "JOIN rounds r ON rk.round_id = r.id " +
                 "WHERE r.event_id = ? AND r.name = 'Final Round' " +
+                "AND t.category_id = ? " + // BỔ SUNG ĐIỀU KIỆN NÀY (Tùy thuộc vào Database Schema của bạn)
                 "ORDER BY rk.rank_position ASC";
 
-        List<Map<String, Object>> rawResult = jdbcTemplate.queryForList(sql, eventId);
+        List<Map<String, Object>> rawResult = jdbcTemplate.queryForList(sql, eventId, categoryId);
 
-        // Chuẩn hóa Key thành camelCase để Frontend nhận đúng (Tránh lỗi chữ HOA của JdbcTemplate)
         return rawResult.stream().map(row -> {
             Map<String, Object> formattedRow = new HashMap<>();
             formattedRow.put("teamId", row.getOrDefault("teamId", row.get("TEAMID")));
@@ -118,5 +125,20 @@ public class AwardServiceImpl implements AwardService {
 
         // Chỗ này sau này có thể gọi thêm EmailService hoặc NotificationService
         // emailService.sendResultNotificationEmails(eventId);
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public List<Map<String, Object>> getCategoriesByEvent(Long eventId) {
+        // Câu SQL lấy id và name từ bảng categories theo event_id
+        String sql = "SELECT id, name FROM categories WHERE event_id = ?";
+        List<Map<String, Object>> rawResult = jdbcTemplate.queryForList(sql, eventId);
+
+        return rawResult.stream().map(row -> {
+            Map<String, Object> formattedRow = new HashMap<>();
+            formattedRow.put("id", row.getOrDefault("id", row.get("ID")));
+            formattedRow.put("name", row.getOrDefault("name", row.get("NAME")));
+            return formattedRow;
+        }).collect(Collectors.toList());
     }
 }

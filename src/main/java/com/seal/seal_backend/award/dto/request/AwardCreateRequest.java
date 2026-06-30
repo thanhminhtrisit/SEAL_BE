@@ -9,6 +9,9 @@ public record AwardCreateRequest(
         @NotNull(message = "Event ID không được để trống")
         Long eventId,
 
+        @NotNull(message = "Category ID không được để trống") // Thêm trường này
+        Long categoryId,
+
         @NotNull(message = "Team ID không được để trống")
         Long teamId,
 
