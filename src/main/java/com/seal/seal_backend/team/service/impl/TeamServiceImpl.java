@@ -41,6 +41,21 @@ public class TeamServiceImpl implements TeamService {
         Event event = findEvent(req.eventId());
         Category category = findCategory(req.categoryId(), req.eventId());
 
+        // BR-TEAM-04: event must be OPEN for team registration
+        if (event.getStatus() != EventStatus.OPEN) {
+            throw new BusinessRuleException("BR-TEAM-04",
+                    "Event is not open for registration (status: " + event.getStatus() + ")");
+        }
+
+        // BR-TEAM-04: must be within the event's registration window
+        LocalDateTime now = LocalDateTime.now();
+        if (event.getRegistrationStart() != null && now.isBefore(event.getRegistrationStart())) {
+            throw new BusinessRuleException("BR-TEAM-04", "Registration window has not opened yet");
+        }
+        if (event.getRegistrationEnd() != null && now.isAfter(event.getRegistrationEnd())) {
+            throw new BusinessRuleException("BR-TEAM-04", "Registration window has closed");
+        }
+
         User creator = userRepository.findById(creatorId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + creatorId));
 

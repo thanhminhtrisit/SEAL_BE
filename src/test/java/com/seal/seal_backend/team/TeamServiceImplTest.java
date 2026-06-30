@@ -55,6 +55,7 @@ class TeamServiceImplTest {
         sampleEvent = new Event();
         sampleEvent.setId(1L);
         sampleEvent.setName("SEAL Summer 2026");
+        sampleEvent.setStatus(EventStatus.OPEN);
         sampleEvent.setRegistrationStart(LocalDateTime.now().minusDays(30));
         sampleEvent.setRegistrationEnd(LocalDateTime.now().plusDays(30));
 
@@ -119,6 +120,42 @@ class TeamServiceImplTest {
             assertThatThrownBy(() -> service.createTeam(
                     new CreateTeamRequest("Team X", null, 99L, 1L), 7L))
                     .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        void eventNotOpen_throws_BR_TEAM_04() {
+            sampleEvent.setStatus(EventStatus.DRAFT);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(1L)).thenReturn(Optional.of(sampleCategory));
+
+            assertThatThrownBy(() -> service.createTeam(
+                    new CreateTeamRequest("Team X", null, 1L, 1L), 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-04");
+        }
+
+        @Test
+        void registrationWindowNotStarted_throws_BR_TEAM_04() {
+            sampleEvent.setRegistrationStart(LocalDateTime.now().plusDays(5));
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(1L)).thenReturn(Optional.of(sampleCategory));
+
+            assertThatThrownBy(() -> service.createTeam(
+                    new CreateTeamRequest("Team X", null, 1L, 1L), 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-04");
+        }
+
+        @Test
+        void registrationWindowClosed_throws_BR_TEAM_04() {
+            sampleEvent.setRegistrationEnd(LocalDateTime.now().minusDays(1));
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(1L)).thenReturn(Optional.of(sampleCategory));
+
+            assertThatThrownBy(() -> service.createTeam(
+                    new CreateTeamRequest("Team X", null, 1L, 1L), 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-04");
         }
 
         @Test
