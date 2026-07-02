@@ -343,6 +343,15 @@ public class EventController {
                 eventService.archiveEvent(eventId, user.getId())));
     }
 
+    // ─── Mentor Planning ──────────────────────────────────────────────────────
+
+    @GetMapping("/{eventId}/mentor-planning")
+    @PreAuthorize("hasAnyRole('COORDINATOR','SUPER_COORDINATOR')")
+    @Operation(summary = "Mentor capacity planning: active teams, mentors needed, current mentors, gap")
+    public ApiResponse<MentorPlanningResponse> getMentorPlanning(@PathVariable Long eventId) {
+        return ApiResponse.ok(eventService.getMentorPlanning(eventId));
+    }
+
     // ─── Judge Assignment ─────────────────────────────────────────────────────
 
     @PostMapping("/{eventId}/rounds/{roundId}/judges")

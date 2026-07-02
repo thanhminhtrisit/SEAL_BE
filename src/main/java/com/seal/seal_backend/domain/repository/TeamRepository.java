@@ -20,4 +20,10 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
            "WHERE tm.user.id = :userId AND tm.team.event.id = :eventId " +
            "AND tm.status = com.seal.seal_backend.domain.enums.TeamMemberStatus.ACTIVE")
     boolean existsActiveMemberByUserIdAndEventId(@Param("userId") Long userId, @Param("eventId") Long eventId);
+
+    @Query("SELECT COUNT(t) FROM Team t WHERE t.event.id = :eventId " +
+           "AND t.status IN (com.seal.seal_backend.domain.enums.TeamStatus.REGISTERED, " +
+           "com.seal.seal_backend.domain.enums.TeamStatus.APPROVED, " +
+           "com.seal.seal_backend.domain.enums.TeamStatus.ACTIVE)")
+    long countActiveTeamsByEventId(@Param("eventId") Long eventId);
 }

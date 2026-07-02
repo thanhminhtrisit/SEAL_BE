@@ -1,5 +1,6 @@
 package com.seal.seal_backend.team.service.impl;
 
+import com.seal.seal_backend.capacity.CapacityService;
 import com.seal.seal_backend.common.audit.AuditAction;
 import com.seal.seal_backend.common.audit.AuditPublisher;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
@@ -22,15 +23,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TeamServiceImpl implements TeamService {
 
-    private static final int TEAM_MIN_SIZE = 3;
-    private static final int TEAM_MAX_SIZE = 5;
-
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final TeamInvitationRepository teamInvitationRepository;
     private final EventRepository eventRepository;
     private final CategoryRepository categoryRepository;
     private final UserRepository userRepository;
+    private final CapacityService capacityService;
     private final AuditPublisher auditPublisher;
 
     // ─── FR-TEAM-01: Create team ──────────────────────────────────────────────
@@ -69,6 +68,17 @@ public class TeamServiceImpl implements TeamService {
         if (teamRepository.existsByEventIdAndName(req.eventId(), req.name())) {
             throw new BusinessRuleException("TEAM-NAME-CONFLICT",
                     "Team name '" + req.name() + "' already exists in this event");
+        }
+
+        // BR-CAP-01: event max teams
+        long activeTeams = teamRepository.countActiveTeamsByEventId(req.eventId());
+        if (activeTeams >= capacityService.effectiveMaxTeams(event)) {
+            throw new BusinessRuleException("BR-CAP-01", "Đã đạt số nhóm tối đa của sự kiện");
+        }
+        // BR-CAP-02: event max participants
+        long currentParticipants = teamMemberRepository.countDistinctParticipantsByEventId(req.eventId());
+        if (currentParticipants >= capacityService.effectiveMaxParticipants(event)) {
+            throw new BusinessRuleException("BR-CAP-02", "Đã đạt số người tham gia tối đa của sự kiện");
         }
 
         Team team = new Team();
@@ -146,11 +156,10 @@ public class TeamServiceImpl implements TeamService {
             }
         });
 
-        // BR-TEAM-01: team must not already be at max size
+        // BR-CAP-03: team must not already be at capacity
         long currentSize = teamMemberRepository.countActiveByTeamId(teamId);
-        if (currentSize >= TEAM_MAX_SIZE) {
-            throw new BusinessRuleException("BR-TEAM-01",
-                    "Team already has maximum size of " + TEAM_MAX_SIZE + " members");
+        if (currentSize >= capacityService.effectiveMaxTeamSize(team.getEvent())) {
+            throw new BusinessRuleException("BR-CAP-03", "Nhóm đã đủ sĩ số tối đa");
         }
 
         TeamInvitation inv = new TeamInvitation();
@@ -229,11 +238,16 @@ public class TeamServiceImpl implements TeamService {
                     "You already belong to another team in this event");
         }
 
-        // BR-TEAM-01: team must not be at max capacity
+        // BR-CAP-03: team at capacity
+        Event teamEvent = team.getEvent();
         long currentSize = teamMemberRepository.countActiveByTeamId(team.getId());
-        if (currentSize >= TEAM_MAX_SIZE) {
-            throw new BusinessRuleException("BR-TEAM-01",
-                    "Team is already at maximum size of " + TEAM_MAX_SIZE);
+        if (currentSize >= capacityService.effectiveMaxTeamSize(teamEvent)) {
+            throw new BusinessRuleException("BR-CAP-03", "Nhóm đã đủ sĩ số tối đa");
+        }
+        // BR-CAP-02: event participant capacity
+        long totalParticipants = teamMemberRepository.countDistinctParticipantsByEventId(eventId);
+        if (totalParticipants >= capacityService.effectiveMaxParticipants(teamEvent)) {
+            throw new BusinessRuleException("BR-CAP-02", "Đã đạt số người tham gia tối đa của sự kiện");
         }
 
         // Create the new TeamMember
@@ -341,12 +355,16 @@ public class TeamServiceImpl implements TeamService {
         String oldJson = "{\"status\":\"" + team.getStatus() + "\"}";
 
         if (req.approved()) {
-            // BR-TEAM-01: active member count must be within [min, max]
             long activeCount = teamMemberRepository.countActiveByTeamId(teamId);
-            if (activeCount < TEAM_MIN_SIZE || activeCount > TEAM_MAX_SIZE) {
+            Event teamEvent = team.getEvent();
+            // BR-CAP-04: min size check (uses capacity service, replaces hardcoded 3)
+            if (activeCount < capacityService.effectiveMinTeamSize(teamEvent)) {
+                throw new BusinessRuleException("BR-CAP-04", "Nhóm chưa đủ sĩ số tối thiểu để duyệt");
+            }
+            // BR-TEAM-01: max size check
+            if (activeCount > capacityService.effectiveMaxTeamSize(teamEvent)) {
                 throw new BusinessRuleException("BR-TEAM-01",
-                        "Team must have " + TEAM_MIN_SIZE + "–" + TEAM_MAX_SIZE
-                                + " active members to be approved; current: " + activeCount);
+                        "Team exceeds maximum size of " + capacityService.effectiveMaxTeamSize(teamEvent));
             }
             team.setStatus(TeamStatus.APPROVED);
             team.setApprovedBy(coordinator);

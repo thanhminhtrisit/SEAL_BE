@@ -20,6 +20,11 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, TeamMemb
     @Query("SELECT COUNT(tm) FROM TeamMember tm WHERE tm.team.id = :teamId " +
            "AND tm.status = com.seal.seal_backend.domain.enums.TeamMemberStatus.ACTIVE")
     long countActiveByTeamId(@Param("teamId") Long teamId);
+
+    @Query("SELECT COUNT(DISTINCT tm.user.id) FROM TeamMember tm " +
+           "WHERE tm.team.event.id = :eventId " +
+           "AND tm.status = com.seal.seal_backend.domain.enums.TeamMemberStatus.ACTIVE")
+    long countDistinctParticipantsByEventId(@Param("eventId") Long eventId);
     List<TeamMember> findByUser_IdAndStatusOrderByJoinedAtDesc(
             Long userId,
             TeamMemberStatus status

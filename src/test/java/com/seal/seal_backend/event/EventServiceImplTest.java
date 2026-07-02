@@ -15,6 +15,7 @@ import com.seal.seal_backend.domain.repository.*;
 import com.seal.seal_backend.domain.enums.RoundStatus;
 import com.seal.seal_backend.event.dto.request.*;
 import com.seal.seal_backend.event.dto.response.*;
+import com.seal.seal_backend.capacity.CapacityService;
 import com.seal.seal_backend.event.service.impl.EventServiceImpl;
 import com.seal.seal_backend.shared.contract.JudgeQueryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,6 +50,7 @@ class EventServiceImplTest {
     @Mock EventBudgetRepository eventBudgetRepository;
     @Mock TeamRepository teamRepository;
     @Mock CategoryResourceRepository categoryResourceRepository;
+    @Mock CapacityService capacityService;
     @Mock AuditPublisher auditPublisher;
     @Mock JudgeQueryPort judgeQueryPort;
 
@@ -540,7 +542,7 @@ class EventServiceImplTest {
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
 
             assertThatThrownBy(() -> service.update(1L,
-                    new UpdateEventRequest("New Name", null, null, null)))
+                    new UpdateEventRequest("New Name", null, null, null, null, null, null, null)))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
         }
@@ -855,6 +857,69 @@ class EventServiceImplTest {
             service.deleteCategoryResource(1L, 10L, 5L);
 
             verify(categoryResourceRepository).deleteById(5L);
+        }
+    }
+
+    // ─── Mentor Planning ──────────────────────────────────────────────────────
+
+    @Nested
+    class MentorPlanning {
+
+        @Test
+        void correctCalculation_withGap() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(10L);
+            when(capacityService.effectiveMaxTeamsPerMentor(sampleEvent)).thenReturn(5);
+            when(categoryRepository.countDistinctMentorsByEventId(1L)).thenReturn(1L);
+
+            MentorPlanningResponse resp = service.getMentorPlanning(1L);
+
+            assertThat(resp.activeTeams()).isEqualTo(10L);
+            assertThat(resp.maxTeamsPerMentor()).isEqualTo(5);
+            assertThat(resp.mentorsNeeded()).isEqualTo(2); // ceil(10/5)
+            assertThat(resp.currentMentors()).isEqualTo(1L);
+            assertThat(resp.gap()).isEqualTo(1); // 2 - 1
+        }
+
+        @Test
+        void noGap_whenEnoughMentors() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(8L);
+            when(capacityService.effectiveMaxTeamsPerMentor(sampleEvent)).thenReturn(5);
+            when(categoryRepository.countDistinctMentorsByEventId(1L)).thenReturn(2L);
+
+            MentorPlanningResponse resp = service.getMentorPlanning(1L);
+
+            assertThat(resp.mentorsNeeded()).isEqualTo(2); // ceil(8/5)=2
+            assertThat(resp.currentMentors()).isEqualTo(2L);
+            assertThat(resp.gap()).isEqualTo(0);
+        }
+
+        @Test
+        void gapIsNeverNegative_whenMoreMentorsThanNeeded() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(3L);
+            when(capacityService.effectiveMaxTeamsPerMentor(sampleEvent)).thenReturn(5);
+            when(categoryRepository.countDistinctMentorsByEventId(1L)).thenReturn(5L);
+
+            MentorPlanningResponse resp = service.getMentorPlanning(1L);
+
+            assertThat(resp.mentorsNeeded()).isEqualTo(1); // ceil(3/5)=1
+            assertThat(resp.currentMentors()).isEqualTo(5L);
+            assertThat(resp.gap()).isEqualTo(0); // max(0, 1-5)=0
+        }
+
+        @Test
+        void noActiveTeams_returnsZeroNeeded() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(0L);
+            when(capacityService.effectiveMaxTeamsPerMentor(sampleEvent)).thenReturn(5);
+            when(categoryRepository.countDistinctMentorsByEventId(1L)).thenReturn(0L);
+
+            MentorPlanningResponse resp = service.getMentorPlanning(1L);
+
+            assertThat(resp.mentorsNeeded()).isEqualTo(0);
+            assertThat(resp.gap()).isEqualTo(0);
         }
     }
 

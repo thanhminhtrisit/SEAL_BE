@@ -213,6 +213,11 @@ CREATE TABLE events (
                         approved_at TIMESTAMP NULL,
                         rejection_reason TEXT,
                         archived_at TIMESTAMP NULL,
+    -- Capacity overrides theo event (NULL = dùng default trong system_configs)
+                        max_team_size INT UNSIGNED NULL,
+                        max_teams INT UNSIGNED NULL,
+                        max_participants INT UNSIGNED NULL,
+                        max_teams_per_mentor INT UNSIGNED NULL,
                         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -957,7 +962,10 @@ END$$
                                                                                                    ('PASSWORD_MIN_LENGTH', '8', 'Minimum password length', 1),
                                                                                                    ('DEFAULT_CURRENCY', 'VND', 'Default event budget currency', 1),
                                                                                                    ('TEAM_MIN_SIZE', '3', 'Minimum team size', 1),
-                                                                                                   ('TEAM_MAX_SIZE', '5', 'Maximum team size', 1);
+                                                                                                   ('TEAM_MAX_SIZE', '5', 'Maximum team size', 1),
+                                                                                                   ('MAX_TEAMS_PER_EVENT', '50', 'Default max number of teams per event', 1),
+                                                                                                   ('MAX_PARTICIPANTS_PER_EVENT', '300', 'Default max number of participants per event', 1),
+                                                                                                   ('MAX_TEAMS_PER_MENTOR', '5', 'Default max number of teams a mentor can manage', 1);
 
 -- Term Plan
                 INSERT INTO term_plans (id, term, year, discipline_id, max_events, created_by) VALUES

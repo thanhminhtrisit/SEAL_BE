@@ -18,6 +18,10 @@ public record EventResponse(
         LocalDateTime registrationEnd,
         EventStatus status,
         Long ownerCoordinatorId,
+        Integer maxTeamSize,
+        Integer maxTeams,
+        Integer maxParticipants,
+        Integer maxTeamsPerMentor,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -30,6 +34,8 @@ public record EventResponse(
                 e.getRegistrationStart(), e.getRegistrationEnd(),
                 e.getStatus(),
                 e.getOwnerCoordinator().getId(),
+                e.getMaxTeamSize(), e.getMaxTeams(),
+                e.getMaxParticipants(), e.getMaxTeamsPerMentor(),
                 e.getCreatedAt(), e.getUpdatedAt()
         );
     }

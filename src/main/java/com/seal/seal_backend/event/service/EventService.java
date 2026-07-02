@@ -60,4 +60,7 @@ public interface EventService {
     EventResponse startEvent(Long eventId, Long coordinatorId);
     EventResponse completeEvent(Long eventId, Long coordinatorId);
     EventResponse archiveEvent(Long eventId, Long coordinatorId);
+
+    // --- Mentor Planning ---
+    MentorPlanningResponse getMentorPlanning(Long eventId);
 }

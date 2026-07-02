@@ -40,6 +40,10 @@ public class Event {
     @Column(name = "approved_at") private LocalDateTime approvedAt;
     @Lob @Column(name = "rejection_reason") private String rejectionReason;
     @Column(name = "archived_at") private LocalDateTime archivedAt;
+    @Column(name = "max_team_size") private Integer maxTeamSize;
+    @Column(name = "max_teams") private Integer maxTeams;
+    @Column(name = "max_participants") private Integer maxParticipants;
+    @Column(name = "max_teams_per_mentor") private Integer maxTeamsPerMentor;
     @CreationTimestamp @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
     @UpdateTimestamp @Column(name = "updated_at")

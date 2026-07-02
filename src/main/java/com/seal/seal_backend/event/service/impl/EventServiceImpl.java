@@ -1,5 +1,6 @@
 package com.seal.seal_backend.event.service.impl;
 
+import com.seal.seal_backend.capacity.CapacityService;
 import com.seal.seal_backend.common.audit.AuditAction;
 import com.seal.seal_backend.common.audit.AuditPublisher;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
@@ -40,6 +41,7 @@ public class EventServiceImpl implements EventService {
     private final EventBudgetRepository eventBudgetRepository;
     private final TeamRepository teamRepository;
     private final CategoryResourceRepository categoryResourceRepository;
+    private final CapacityService capacityService;
     private final AuditPublisher auditPublisher;
     private final JudgeQueryPort judgeQueryPort;
 
@@ -119,6 +121,10 @@ public class EventServiceImpl implements EventService {
         if (req.description() != null) event.setDescription(req.description());
         if (req.registrationStart() != null) event.setRegistrationStart(req.registrationStart());
         if (req.registrationEnd() != null) event.setRegistrationEnd(req.registrationEnd());
+        if (req.maxTeamSize() != null) event.setMaxTeamSize(req.maxTeamSize());
+        if (req.maxTeams() != null) event.setMaxTeams(req.maxTeams());
+        if (req.maxParticipants() != null) event.setMaxParticipants(req.maxParticipants());
+        if (req.maxTeamsPerMentor() != null) event.setMaxTeamsPerMentor(req.maxTeamsPerMentor());
 
         if (event.getRegistrationStart() != null && event.getRegistrationEnd() != null
                 && !event.getRegistrationStart().isBefore(event.getRegistrationEnd())) {
@@ -813,6 +819,22 @@ public class EventServiceImpl implements EventService {
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    // ─── Mentor Planning ──────────────────────────────────────────────────────
+
+    @Override
+    @Transactional(readOnly = true)
+    public MentorPlanningResponse getMentorPlanning(Long eventId) {
+        Event event = findEvent(eventId);
+        long activeTeams = teamRepository.countActiveTeamsByEventId(eventId);
+        int maxTeamsPerMentor = capacityService.effectiveMaxTeamsPerMentor(event);
+        int mentorsNeeded = maxTeamsPerMentor == 0 ? 0
+                : (int) Math.ceil((double) activeTeams / maxTeamsPerMentor);
+        long currentMentors = categoryRepository.countDistinctMentorsByEventId(eventId);
+        int gap = (int) Math.max(0L, mentorsNeeded - currentMentors);
+        return new MentorPlanningResponse(eventId, activeTeams, maxTeamsPerMentor,
+                mentorsNeeded, currentMentors, gap);
+    }
 
     private void validateNotPending(Event event) {
         if (event.getStatus() == EventStatus.PENDING_APPROVAL) {
