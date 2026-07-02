@@ -10,5 +10,7 @@ public record CreateCriteriaSetRequest(
         @NotBlank @Size(max = 150) String name,
         String description,
         Long roundId,
+        Long categoryId,
+        Integer promotionTopN,
         @NotEmpty List<@Valid AddCriterionRequest> criteria
 ) {}

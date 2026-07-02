@@ -101,9 +101,11 @@ public class EventServiceImpl implements EventService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<EventSummaryResponse> listAll() {
-        return eventRepository.findAllByOrderByCreatedAtDesc()
-                .stream().map(EventSummaryResponse::from).toList();
+    public List<EventSummaryResponse> listAll(EventStatus status) {
+        List<Event> events = status == null
+                ? eventRepository.findAllByOrderByCreatedAtDesc()
+                : eventRepository.findAllByStatusOrderByCreatedAtDesc(status);
+        return events.stream().map(EventSummaryResponse::from).toList();
     }
 
     @Override
@@ -217,9 +219,14 @@ public class EventServiceImpl implements EventService {
         round.setName(req.name());
         round.setOrderNumber(req.orderNumber());
         round.setSubmissionDeadline(req.submissionDeadline());
+        round.setScoringDeadline(req.scoringDeadline());
         round.setPromotionTopN(req.promotionTopN());
         round.setIsFinalRound(req.finalRound());
         round.setStatus(RoundStatus.DRAFT);
+        if (req.requiresRepo() != null) round.setRequiresRepo(req.requiresRepo());
+        if (req.requiresDemo() != null) round.setRequiresDemo(req.requiresDemo());
+        if (req.requiresSlide() != null) round.setRequiresSlide(req.requiresSlide());
+        if (req.requiresReport() != null) round.setRequiresReport(req.requiresReport());
 
         return RoundResponse.from(roundRepository.save(round));
     }
@@ -249,8 +256,13 @@ public class EventServiceImpl implements EventService {
 
         if (req.name() != null && !req.name().isBlank()) round.setName(req.name());
         if (req.submissionDeadline() != null) round.setSubmissionDeadline(req.submissionDeadline());
+        if (req.scoringDeadline() != null) round.setScoringDeadline(req.scoringDeadline());
         if (req.promotionTopN() != null) round.setPromotionTopN(req.promotionTopN());
         if (req.finalRound() != null) round.setIsFinalRound(req.finalRound());
+        if (req.requiresRepo() != null) round.setRequiresRepo(req.requiresRepo());
+        if (req.requiresDemo() != null) round.setRequiresDemo(req.requiresDemo());
+        if (req.requiresSlide() != null) round.setRequiresSlide(req.requiresSlide());
+        if (req.requiresReport() != null) round.setRequiresReport(req.requiresReport());
 
         return RoundResponse.from(roundRepository.save(round));
     }
@@ -279,11 +291,24 @@ public class EventServiceImpl implements EventService {
             round = findRound(req.roundId(), eventId);
         }
 
+        Category category = null;
+        if (req.categoryId() != null) {
+            category = categoryRepository.findById(req.categoryId())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Category not found: " + req.categoryId()));
+            if (!category.getEvent().getId().equals(eventId)) {
+                throw new BusinessRuleException("BR-EVT-14",
+                        "Category " + req.categoryId() + " does not belong to event " + eventId);
+            }
+        }
+
         CriteriaSet cs = new CriteriaSet();
         cs.setName(req.name());
         cs.setDescription(req.description());
         cs.setEvent(event);
         cs.setRound(round);
+        cs.setCategory(category);
+        cs.setPromotionTopN(req.promotionTopN());
         cs.setIsTemplate(false);
         cs.setIsDefault(false);
         cs.setCreatedBy(creator);

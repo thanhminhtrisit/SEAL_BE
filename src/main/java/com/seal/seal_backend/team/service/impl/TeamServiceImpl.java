@@ -106,10 +106,12 @@ public class TeamServiceImpl implements TeamService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TeamSummaryResponse> listTeamsByEvent(Long eventId) {
+    public List<TeamSummaryResponse> listTeamsByEvent(Long eventId, TeamStatus status) {
         findEvent(eventId);
-        return teamRepository.findByEventIdOrderByCreatedAtAsc(eventId)
-                .stream().map(TeamSummaryResponse::from).toList();
+        List<Team> teams = status == null
+                ? teamRepository.findByEventIdOrderByCreatedAtAsc(eventId)
+                : teamRepository.findByEventIdAndStatusOrderByCreatedAtAsc(eventId, status);
+        return teams.stream().map(TeamSummaryResponse::from).toList();
     }
 
     // ─── FR-TEAM-03: Invite member ────────────────────────────────────────────

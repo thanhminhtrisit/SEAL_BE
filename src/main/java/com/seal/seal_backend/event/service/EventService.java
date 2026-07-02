@@ -1,5 +1,6 @@
 package com.seal.seal_backend.event.service;
 
+import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.event.dto.request.*;
 import com.seal.seal_backend.event.dto.response.*;
 import java.util.List;
@@ -9,7 +10,7 @@ public interface EventService {
     // --- Event ---
     EventResponse create(CreateEventRequest req, Long creatorId);
     EventResponse getById(Long id);
-    List<EventSummaryResponse> listAll();
+    List<EventSummaryResponse> listAll(EventStatus status);
     EventResponse update(Long id, UpdateEventRequest req);
 
     // --- Round ---

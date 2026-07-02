@@ -20,6 +20,9 @@ public class CriteriaSet {
     private Event event;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "round_id")
     private Round round;
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "category_id")
+    private Category category;
+    @Column(name = "promotion_top_n") private Integer promotionTopN;
     @Column(name = "is_template", nullable = false) private Boolean isTemplate = false;
     @Column(name = "is_default", nullable = false) private Boolean isDefault = false;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "created_by")

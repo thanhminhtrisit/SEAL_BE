@@ -1,5 +1,6 @@
 package com.seal.seal_backend.team.service;
 
+import com.seal.seal_backend.domain.enums.TeamStatus;
 import com.seal.seal_backend.team.dto.request.*;
 import com.seal.seal_backend.team.dto.response.*;
 import java.util.List;
@@ -11,7 +12,7 @@ public interface TeamService {
 
     // Read
     TeamResponse getTeam(Long teamId);
-    List<TeamSummaryResponse> listTeamsByEvent(Long eventId);
+    List<TeamSummaryResponse> listTeamsByEvent(Long eventId, TeamStatus status);
 
     // FR-TEAM-03: invite member by email (BR-TEAM-06: no duplicate in same event)
     InvitationResponse inviteMember(Long teamId, InviteMemberRequest req, Long inviterId);

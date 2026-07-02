@@ -506,6 +506,59 @@ class TeamServiceImplTest {
         }
     }
 
+    // ─── listTeamsByEvent with status filter ──────────────────────────────────
+
+    @Nested
+    class ListTeamsByEvent {
+
+        @Test
+        void noFilter_returnsAllTeams() {
+            Team t2 = new Team();
+            t2.setId(2L);
+            t2.setEvent(sampleEvent);
+            t2.setCategory(sampleCategory);
+            t2.setLeader(sampleLeader);
+            t2.setName("Seal Beta");
+            t2.setStatus(TeamStatus.APPROVED);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.findByEventIdOrderByCreatedAtAsc(1L))
+                    .thenReturn(List.of(sampleTeam, t2));
+
+            var result = service.listTeamsByEvent(1L, null);
+
+            assertThat(result).hasSize(2);
+        }
+
+        @Test
+        void filterApproved_returnsOnlyApprovedTeams() {
+            Team approved = new Team();
+            approved.setId(2L);
+            approved.setEvent(sampleEvent);
+            approved.setCategory(sampleCategory);
+            approved.setLeader(sampleLeader);
+            approved.setName("Seal Approved");
+            approved.setStatus(TeamStatus.APPROVED);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.findByEventIdAndStatusOrderByCreatedAtAsc(1L, TeamStatus.APPROVED))
+                    .thenReturn(List.of(approved));
+
+            var result = service.listTeamsByEvent(1L, TeamStatus.APPROVED);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).status()).isEqualTo(TeamStatus.APPROVED);
+        }
+
+        @Test
+        void eventNotFound_throws_ResourceNotFound() {
+            when(eventRepository.findById(99L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.listTeamsByEvent(99L, null))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private Category buildCategory(Long id, String name) {

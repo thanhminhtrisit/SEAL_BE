@@ -1,6 +1,7 @@
 package com.seal.seal_backend.domain.repository;
 
 import com.seal.seal_backend.domain.entity.Team;
+import com.seal.seal_backend.domain.enums.TeamStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -10,6 +11,7 @@ import java.util.List;
 @Repository
 public interface TeamRepository extends JpaRepository<Team, Long> {
     List<Team> findByEventIdOrderByCreatedAtAsc(Long eventId);
+    List<Team> findByEventIdAndStatusOrderByCreatedAtAsc(Long eventId, TeamStatus status);
     boolean existsByEventIdAndName(Long eventId, String name);
     boolean existsByEventIdAndCategoryIdAndIdNot(Long eventId, Long categoryId, Long excludeTeamId);
     boolean existsByCategoryId(Long categoryId);

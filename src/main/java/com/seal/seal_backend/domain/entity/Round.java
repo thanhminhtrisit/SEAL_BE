@@ -19,10 +19,15 @@ public class Round {
     @Column(nullable = false, length = 150) private String name;
     @Column(name = "order_number", nullable = false) private Integer orderNumber;
     @Column(name = "submission_deadline") private LocalDateTime submissionDeadline;
+    @Column(name = "scoring_deadline") private LocalDateTime scoringDeadline;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 30)
     private RoundStatus status = RoundStatus.DRAFT;
     @Column(name = "promotion_top_n") private Integer promotionTopN;
     @Column(name = "is_final_round", nullable = false) private Boolean isFinalRound = false;
+    @Column(name = "requires_repo", nullable = false) private Boolean requiresRepo = true;
+    @Column(name = "requires_demo", nullable = false) private Boolean requiresDemo = false;
+    @Column(name = "requires_slide", nullable = false) private Boolean requiresSlide = false;
+    @Column(name = "requires_report", nullable = false) private Boolean requiresReport = false;
     @CreationTimestamp @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
     @UpdateTimestamp @Column(name = "updated_at")

@@ -142,7 +142,7 @@ class EventServiceImplTest {
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
             when(roundRepository.existsByEventIdAndOrderNumber(1L, 1)).thenReturn(true);
 
-            CreateRoundRequest req = new CreateRoundRequest("Round 1", 1, null, null, false);
+            CreateRoundRequest req = new CreateRoundRequest("Round 1", 1, null, null, null, false, null, null, null, null);
 
             assertThatThrownBy(() -> service.addRound(1L, req))
                     .isInstanceOf(BusinessRuleException.class)
@@ -154,7 +154,7 @@ class EventServiceImplTest {
             when(eventRepository.findById(99L)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.addRound(99L,
-                    new CreateRoundRequest("R1", 1, null, null, false)))
+                    new CreateRoundRequest("R1", 1, null, null, null, false, null, null, null, null)))
                     .isInstanceOf(ResourceNotFoundException.class);
         }
     }
@@ -165,7 +165,7 @@ class EventServiceImplTest {
     class AddCriteriaSet {
 
         private CreateCriteriaSetRequest reqWith(BigDecimal w1, BigDecimal w2) {
-            return new CreateCriteriaSetRequest("Set A", null, null, List.of(
+            return new CreateCriteriaSetRequest("Set A", null, null, null, null, List.of(
                     new AddCriterionRequest("C1", null, new BigDecimal("10"), w1, 1),
                     new AddCriterionRequest("C2", null, new BigDecimal("10"), w2, 2)
             ));
@@ -193,6 +193,27 @@ class EventServiceImplTest {
                     new BigDecimal("60"), new BigDecimal("60")), 3L))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-03");
+        }
+
+        @Test
+        void categoryFromDifferentEvent_throws_BR_EVT_14() {
+            Event otherEvent = new Event();
+            otherEvent.setId(99L);
+            Category foreignCat = new Category();
+            foreignCat.setId(10L);
+            foreignCat.setEvent(otherEvent);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(userRepository.findById(3L)).thenReturn(Optional.of(sampleUser));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(foreignCat));
+
+            CreateCriteriaSetRequest req = new CreateCriteriaSetRequest(
+                    "X", null, null, 10L, null,
+                    List.of(new AddCriterionRequest("C1", null, new BigDecimal("10"), new BigDecimal("100"), 1)));
+
+            assertThatThrownBy(() -> service.addCriteriaSet(1L, req, 3L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-14");
         }
 
         @Test
@@ -528,7 +549,7 @@ class EventServiceImplTest {
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
 
             assertThatThrownBy(() -> service.addRound(1L,
-                    new CreateRoundRequest("R1", 1, null, null, false)))
+                    new CreateRoundRequest("R1", 1, null, null, null, false, null, null, null, null)))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
         }
@@ -724,6 +745,53 @@ class EventServiceImplTest {
             assertThatThrownBy(() -> service.deleteCategory(1L, 20L))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
+        }
+    }
+
+    // ─── listAll with status filter ───────────────────────────────────────────
+
+    @Nested
+    class ListAllEvents {
+
+        @Test
+        void noFilter_returnsAllEvents() {
+            Event e2 = new Event();
+            e2.setId(2L);
+            e2.setName("Open Event");
+            e2.setStatus(EventStatus.OPEN);
+            e2.setOwnerCoordinator(sampleUser);
+
+            when(eventRepository.findAllByOrderByCreatedAtDesc())
+                    .thenReturn(List.of(sampleEvent, e2));
+
+            var result = service.listAll(null);
+
+            assertThat(result).hasSize(2);
+        }
+
+        @Test
+        void filterApproved_returnsOnlyApprovedEvents() {
+            Event approved = new Event();
+            approved.setId(3L);
+            approved.setName("Approved Event");
+            approved.setStatus(EventStatus.APPROVED);
+            approved.setOwnerCoordinator(sampleUser);
+
+            when(eventRepository.findAllByStatusOrderByCreatedAtDesc(EventStatus.APPROVED))
+                    .thenReturn(List.of(approved));
+
+            var result = service.listAll(EventStatus.APPROVED);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).status()).isEqualTo(EventStatus.APPROVED);
+        }
+
+        @Test
+        void filterReturnsEmpty_whenNoMatch() {
+            when(eventRepository.findAllByStatusOrderByCreatedAtDesc(EventStatus.COMPLETED))
+                    .thenReturn(List.of());
+
+            assertThat(service.listAll(EventStatus.COMPLETED)).isEmpty();
         }
     }
 
