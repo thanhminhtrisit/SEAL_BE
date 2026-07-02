@@ -5,6 +5,7 @@ import com.seal.seal_backend.award.dto.response.AwardResponse;
 import com.seal.seal_backend.award.service.AwardService;
 import com.seal.seal_backend.domain.entity.*;
 import com.seal.seal_backend.domain.repository.AwardRepository;
+import com.seal.seal_backend.domain.repository.TeamRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,6 +24,7 @@ import java.util.stream.Collectors;
 public class AwardServiceImpl implements AwardService {
 
     private final AwardRepository awardRepository;
+    private final TeamRepository teamRepository;
     private final JdbcTemplate jdbcTemplate;
 
     @Override
@@ -32,12 +34,30 @@ public class AwardServiceImpl implements AwardService {
             throw new IllegalArgumentException("Không thể xác thực danh tính Người điều phối (User ID is null). Vui lòng đăng nhập lại!");
         }
 
+
+        //Kiểm tra đội thi có tồn tại không
+        Team team = teamRepository.findById(request.teamId())
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đội thi với ID: " + request.teamId()));
+
+        //Chặn trao giải cho đội đã bị đình chỉ
+        if ("DISQUALIFIED".equals(team.getStatus())) {
+            throw new RuntimeException("Lỗi: Đội thi '" + team.getName() + "' đã bị đình chỉ và không đủ điều kiện nhận giải!");
+        }
+
+        //Chống Spam: Kiểm tra đội thi đã nhận giải thưởng này trong sự kiện này chưa
+        boolean isAlreadyAwarded = awardRepository.existsByEventIdAndTeamIdAndAwardType(
+                request.eventId(),
+                request.teamId(),
+                request.awardType()
+        );
+
+        if (isAlreadyAwarded) {
+            throw new RuntimeException("Lỗi: Đội '" + team.getName() + "' đã được trao giải '" + request.awardType() + "' rồi!");
+        }
+
         log.info("Coordinator (ID:{}) đang gán giải {} cho Team ID: {}", userId, request.awardType(), request.teamId());
 
         Event eventRef = new Event(); eventRef.setId(request.eventId());
-        Team teamRef = new Team(); teamRef.setId(request.teamId());
-
-        // Bây giờ chắc chắn userId đã có giá trị thực
         User userRef = new User(); userRef.setId(userId);
 
         Ranking rankingRef = null;
@@ -48,7 +68,7 @@ public class AwardServiceImpl implements AwardService {
 
         Award award = Award.builder()
                 .event(eventRef)
-                .team(teamRef)
+                .team(team)
                 .ranking(rankingRef)
                 .awardType(request.awardType())
                 .description(request.description())
@@ -61,7 +81,7 @@ public class AwardServiceImpl implements AwardService {
                 savedAward.getId(),
                 request.eventId(),
                 request.teamId(),
-                "Team-" + request.teamId(),
+                team.getName(),
                 savedAward.getAwardType(),
                 savedAward.getDescription(),
                 userId,
@@ -93,9 +113,9 @@ public class AwardServiceImpl implements AwardService {
     @Override
     public List<Map<String, Object>> getEligibleTeamsForAward(Long eventId, Long categoryId) {
         String roundSql = "SELECT id FROM rounds " +
-            "WHERE event_id = ? " +
-            "ORDER BY is_final_round DESC, order_number DESC, id DESC " +
-            "LIMIT 1";
+                "WHERE event_id = ? " +
+                "ORDER BY is_final_round DESC, order_number DESC, id DESC " +
+                "LIMIT 1";
 
         List<Map<String, Object>> roundRows = jdbcTemplate.queryForList(roundSql, eventId);
         if (roundRows.isEmpty()) {
@@ -105,12 +125,12 @@ public class AwardServiceImpl implements AwardService {
         Long eligibleRoundId = ((Number) roundRows.get(0).get("id")).longValue();
 
         String sql = "SELECT t.id AS teamId, t.name AS teamName, " +
-            "rk.rank_position AS rankPosition, rk.total_score AS totalScore " +
-            "FROM rankings rk " +
-            "JOIN teams t ON rk.team_id = t.id " +
-            "WHERE rk.round_id = ? " +
-            "AND t.category_id = ? " +
-            "ORDER BY rk.rank_position ASC";
+                "rk.rank_position AS rankPosition, rk.total_score AS totalScore " +
+                "FROM rankings rk " +
+                "JOIN teams t ON rk.team_id = t.id " +
+                "WHERE rk.round_id = ? " +
+                "AND t.category_id = ? " +
+                "ORDER BY rk.rank_position ASC";
 
         List<Map<String, Object>> rawResult = jdbcTemplate.queryForList(sql, eligibleRoundId, categoryId);
 
@@ -128,19 +148,13 @@ public class AwardServiceImpl implements AwardService {
     @Override
     public void publishEventResults(Long eventId, Long userId) {
         log.info("Coordinator (ID:{}) đang CÔNG BỐ KẾT QUẢ sự kiện ID: {}", userId, eventId);
-
-        // Cập nhật trạng thái công bố. Cần đảm bảo bảng events đã có cột is_results_published
         String sql = "UPDATE events SET is_results_published = true WHERE id = ?";
         jdbcTemplate.update(sql, eventId);
-
-        // Chỗ này sau này có thể gọi thêm EmailService hoặc NotificationService
-        // emailService.sendResultNotificationEmails(eventId);
     }
 
     @Transactional(readOnly = true)
     @Override
     public List<Map<String, Object>> getCategoriesByEvent(Long eventId) {
-        // Câu SQL lấy id và name từ bảng categories theo event_id
         String sql = "SELECT id, name FROM categories WHERE event_id = ?";
         List<Map<String, Object>> rawResult = jdbcTemplate.queryForList(sql, eventId);
 
