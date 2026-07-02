@@ -12,12 +12,12 @@
 SET NAMES utf8mb4;
 SET time_zone = '+07:00';
 
-DROP DATABASE IF EXISTS seal_db;
-CREATE DATABASE seal_db
+DROP DATABASE IF EXISTS seal_db_hailq;
+CREATE DATABASE seal_db_hailq
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE seal_db;
+USE seal_db_hailq;
 
 -- =========================================================
 -- 1. MASTER DATA / USER / ROLE
@@ -227,6 +227,10 @@ CREATE TABLE rounds (
     status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
     promotion_top_n INT UNSIGNED NULL,
     is_final_round BOOLEAN NOT NULL DEFAULT FALSE,
+    requires_repo BOOLEAN NOT NULL DEFAULT TRUE,
+    requires_demo BOOLEAN NOT NULL DEFAULT FALSE,
+    requires_slide BOOLEAN NOT NULL DEFAULT FALSE,
+    requires_report BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -460,7 +464,7 @@ CREATE TABLE team_invitations (
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 6. JUDGE ASSIGNMENT, SUBMISSION, VERSION
+-- 6. JUDGE ASSIGNMENT AND SUBMISSION ATTEMPTS
 -- =========================================================
 
 CREATE TABLE judge_assignments (
@@ -499,49 +503,32 @@ CREATE TABLE submissions (
     id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     team_id BIGINT UNSIGNED NOT NULL,
     round_id BIGINT UNSIGNED NOT NULL,
-    current_version_id BIGINT UNSIGNED NULL,
-    status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
-    submitted_at TIMESTAMP NULL,
-    last_updated_at TIMESTAMP NULL,
+    submitted_by BIGINT UNSIGNED NOT NULL,
+    attempt_number INT UNSIGNED NOT NULL,
+    repo_url VARCHAR(500),
+    demo_url VARCHAR(500),
+    slide_url VARCHAR(500),
+    report_url VARCHAR(500),
+    change_note VARCHAR(255),
+    status VARCHAR(30) NOT NULL DEFAULT 'SUBMITTED',
+    submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     github_metadata JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    CONSTRAINT uq_submissions_team_round UNIQUE (team_id, round_id),
+    CONSTRAINT uq_submissions_team_round_attempt UNIQUE (team_id, round_id, attempt_number),
     CONSTRAINT fk_submissions_team
         FOREIGN KEY (team_id) REFERENCES teams(id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT fk_submissions_round
         FOREIGN KEY (round_id) REFERENCES rounds(id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
-    CONSTRAINT chk_submissions_status
-        CHECK (status IN ('DRAFT', 'SUBMITTED', 'LATE_REJECTED', 'LOCKED', 'DISQUALIFIED'))
-) ENGINE=InnoDB;
-
-CREATE TABLE submission_versions (
-    id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    submission_id BIGINT UNSIGNED NOT NULL,
-    version_number INT UNSIGNED NOT NULL,
-    repo_url VARCHAR(500) NOT NULL,
-    demo_url VARCHAR(500),
-    slide_url VARCHAR(500),
-    report_url VARCHAR(500),
-    submitted_by BIGINT UNSIGNED NOT NULL,
-    submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    change_note VARCHAR(255),
-
-    CONSTRAINT uq_submission_versions_number UNIQUE (submission_id, version_number),
-    CONSTRAINT fk_submission_versions_submission
-        FOREIGN KEY (submission_id) REFERENCES submissions(id)
-        ON DELETE RESTRICT ON UPDATE CASCADE,
-    CONSTRAINT fk_submission_versions_submitted_by
+    CONSTRAINT fk_submissions_submitted_by
         FOREIGN KEY (submitted_by) REFERENCES users(id)
-        ON DELETE RESTRICT ON UPDATE CASCADE
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_submissions_status
+        CHECK (status IN ('SUBMITTED', 'LATE_REJECTED', 'LOCKED', 'DISQUALIFIED'))
 ) ENGINE=InnoDB;
-
-ALTER TABLE submissions
-    ADD CONSTRAINT fk_submissions_current_version
-        FOREIGN KEY (current_version_id) REFERENCES submission_versions(id)
-        ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- =========================================================
 -- 7. EVALUATION, SCORE, RANKING, AWARD, PUBLICATION
@@ -551,7 +538,7 @@ CREATE TABLE evaluations (
     id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     judge_assignment_id BIGINT UNSIGNED NULL,
     judge_id BIGINT UNSIGNED NOT NULL,
-    submission_version_id BIGINT UNSIGNED NOT NULL,
+    submission_id BIGINT UNSIGNED NOT NULL,
     round_id BIGINT UNSIGNED NOT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
     general_comment TEXT,
@@ -561,15 +548,15 @@ CREATE TABLE evaluations (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    CONSTRAINT uq_evaluations_judge_submission_version UNIQUE (judge_id, submission_version_id),
+    CONSTRAINT uq_evaluations_judge_submission UNIQUE (judge_id, submission_id),
     CONSTRAINT fk_evaluations_judge_assignment
         FOREIGN KEY (judge_assignment_id) REFERENCES judge_assignments(id)
         ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT fk_evaluations_judge
         FOREIGN KEY (judge_id) REFERENCES users(id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
-    CONSTRAINT fk_evaluations_submission_version
-        FOREIGN KEY (submission_version_id) REFERENCES submission_versions(id)
+    CONSTRAINT fk_evaluations_submission
+        FOREIGN KEY (submission_id) REFERENCES submissions(id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT fk_evaluations_round
         FOREIGN KEY (round_id) REFERENCES rounds(id)
@@ -793,11 +780,10 @@ CREATE INDEX idx_teams_event_category_status ON teams(event_id, category_id, sta
 CREATE INDEX idx_team_members_user ON team_members(user_id);
 CREATE INDEX idx_judge_assignments_judge_round ON judge_assignments(judge_id, round_id);
 
-CREATE INDEX idx_submissions_team_round ON submissions(team_id, round_id);
-CREATE INDEX idx_submission_versions_submission_number ON submission_versions(submission_id, version_number);
+CREATE INDEX idx_submissions_team_round_attempt ON submissions(team_id, round_id, attempt_number);
 
 CREATE INDEX idx_evaluations_judge ON evaluations(judge_id);
-CREATE INDEX idx_evaluations_submission_version ON evaluations(submission_version_id);
+CREATE INDEX idx_evaluations_submission ON evaluations(submission_id);
 CREATE INDEX idx_scores_criterion ON scores(criterion_id);
 
 CREATE INDEX idx_rankings_event_round_category ON rankings(event_id, round_id, category_id);
@@ -993,10 +979,13 @@ VALUES
 
 -- Rounds
 INSERT INTO rounds
-(id, event_id, name, order_number, submission_deadline, status, promotion_top_n, is_final_round)
+(id, event_id, name, order_number, submission_deadline, status, promotion_top_n, is_final_round,
+ requires_repo, requires_demo, requires_slide, requires_report)
 VALUES
-(1, 1, 'Preliminary Round', 1, '2026-06-25 23:59:59', 'SCORING_OPEN', 10, FALSE),
-(2, 1, 'Final Round', 2, '2026-07-05 23:59:59', 'DRAFT', NULL, TRUE);
+(1, 1, 'Preliminary Round', 1, '2026-06-25 23:59:59', 'SCORING_OPEN', 10, FALSE,
+ TRUE, FALSE, FALSE, FALSE),
+(2, 1, 'Final Round', 2, '2026-07-05 23:59:59', 'DRAFT', NULL, TRUE,
+ TRUE, TRUE, TRUE, TRUE);
 
 -- Categories
 INSERT INTO categories
@@ -1080,32 +1069,22 @@ VALUES
 (1, 4, 1, 1, 1, 3, 'ACTIVE'),
 (2, 5, 1, 1, 1, 3, 'ACTIVE');
 
--- Submission and versions
+-- Submission attempt
 INSERT INTO submissions
-(id, team_id, round_id, current_version_id, status, submitted_at, last_updated_at, github_metadata)
+(id, team_id, round_id, submitted_by, attempt_number, repo_url, demo_url, slide_url,
+ report_url, change_note, status, submitted_at, github_metadata)
 VALUES
-(1, 1, 1, NULL, 'SUBMITTED', '2026-06-24 20:00:00', '2026-06-24 20:00:00',
- JSON_OBJECT('repository', 'https://github.com/demo/code-seals', 'language', 'Java'));
-
-INSERT INTO submission_versions
-(id, submission_id, version_number, repo_url, demo_url, slide_url, report_url, submitted_by, submitted_at, change_note)
-VALUES
-(1, 1, 1,
+(1, 1, 1, 7, 1,
  'https://github.com/demo/code-seals',
  'https://demo.seal.local/code-seals',
  'https://docs.google.com/presentation/d/demo',
  'https://docs.google.com/document/d/demo',
- 7,
- '2026-06-24 20:00:00',
- 'Initial submission');
-
-UPDATE submissions
-SET current_version_id = 1
-WHERE id = 1;
+ 'Initial submission', 'SUBMITTED', '2026-06-24 20:00:00',
+ JSON_OBJECT('repository', 'https://github.com/demo/code-seals', 'language', 'Java'));
 
 -- Evaluations and scores
 INSERT INTO evaluations
-(id, judge_assignment_id, judge_id, submission_version_id, round_id, status, general_comment, started_at, submitted_at)
+(id, judge_assignment_id, judge_id, submission_id, round_id, status, general_comment, started_at, submitted_at)
 VALUES
 (1, 1, 4, 1, 1, 'SUBMITTED', 'Good technical foundation and clear demo.', '2026-06-26 09:00:00', '2026-06-26 09:30:00'),
 (2, 2, 5, 1, 1, 'SUBMITTED', 'Strong concept, needs more polish.', '2026-06-26 10:00:00', '2026-06-26 10:25:00');
@@ -1206,25 +1185,16 @@ INSERT INTO teams (id, event_id, category_id, leader_id, name, description, stat
 (3, 1, 1, 11, 'Null Pointers', 'Đội trung bình, điểm thấp', 'ACTIVE'),
 (4, 1, 1, 12, 'Drop Tables', 'Đội vi phạm quy chế', 'DISQUALIFIED');
 
--- 3. TẠO BÀI NỘP VÀ VERSION CHO 3 ĐỘI
-INSERT INTO submissions (id, team_id, round_id, status) VALUES
-(2, 2, 1, 'SUBMITTED'),
-(3, 3, 1, 'SUBMITTED'),
-(4, 4, 1, 'DISQUALIFIED'); -- Bị loại
-
-INSERT INTO submission_versions (id, submission_id, version_number, repo_url, submitted_by) VALUES
-(2, 2, 1, 'https://github.com/demo/cyber-ninjas', 10),
-(3, 3, 1, 'https://github.com/demo/null-pointers', 11),
-(4, 4, 1, 'https://github.com/demo/drop-tables', 12);
-
--- Update lại current_version cho các submission
-UPDATE submissions SET current_version_id = 2 WHERE id = 2;
-UPDATE submissions SET current_version_id = 3 WHERE id = 3;
-UPDATE submissions SET current_version_id = 4 WHERE id = 4;
+-- 3. TẠO BÀI NỘP CHÍNH THỨC CHO 3 ĐỘI
+INSERT INTO submissions
+(id, team_id, round_id, submitted_by, attempt_number, repo_url, status, submitted_at) VALUES
+(2, 2, 1, 10, 1, 'https://github.com/demo/cyber-ninjas', 'SUBMITTED', CURRENT_TIMESTAMP),
+(3, 3, 1, 11, 1, 'https://github.com/demo/null-pointers', 'SUBMITTED', CURRENT_TIMESTAMP),
+(4, 4, 1, 12, 1, 'https://github.com/demo/drop-tables', 'DISQUALIFIED', CURRENT_TIMESTAMP);
 
 -- 4. TẠO EVALUATIONS (Phân công Giám khảo 4 và 5 chấm điểm)
 -- Judge 4 (Internal Judge) và Judge 5 (Guest Judge)
-INSERT INTO evaluations (id, judge_assignment_id, judge_id, submission_version_id, round_id, status) VALUES
+INSERT INTO evaluations (id, judge_assignment_id, judge_id, submission_id, round_id, status) VALUES
 (3, 1, 4, 2, 1, 'SUBMITTED'), -- Judge 4 chấm Team 2
 (4, 2, 5, 2, 1, 'SUBMITTED'), -- Judge 5 chấm Team 2
 
@@ -1254,7 +1224,7 @@ INSERT INTO scores (evaluation_id, criterion_id, score_value, comment) VALUES
 -- 14. DATA MANIPULATION AWARD
 -- =========================================================
 
-USE seal_db;
+USE seal_db_hailq;
 
 -- =====================================================================
 -- 1. TẠO EVENT SỐ 2 (AI HACKATHON) VÀ CÁC TEAM MỚI
@@ -1297,6 +1267,125 @@ USE seal_db;
                                                                                                 (1, 1, (SELECT id FROM rankings WHERE event_id = 1 AND team_id = 1 LIMIT 1), 'SECOND_PLACE', 'Giải Nhì - Kỹ năng lập trình web và kiến trúc cực tốt', 3),
 (1, 3, NULL, 'THIRD_PLACE', 'Giải Ba - Khuyến khích ý tưởng tiềm năng', 3)
     ON DUPLICATE KEY UPDATE description=VALUES(description);
+
+-- =========================================================
+-- 15. ADDITIONAL SUBMISSION DEMO DATA
+-- =========================================================
+
+USE seal_db_hailq;
+
+INSERT INTO users (id, email, password_hash, full_name, primary_role_id, account_type, student_id, university, is_fpt_student, status, approved_by, approved_at) VALUES
+(13, 'leader.pitch@student.local', '$2a$10$replace_with_real_bcrypt_hash_leader13', 'Leader Pitch Deck', 6, 'PARTICIPANT', 'SE190010', 'FPT University HCMC', TRUE, 'ACTIVE', 3, CURRENT_TIMESTAMP),
+(14, 'leader.full@student.local', '$2a$10$replace_with_real_bcrypt_hash_leader14', 'Leader Full Stack', 6, 'PARTICIPANT', 'SE190011', 'FPT University HCMC', TRUE, 'ACTIVE', 3, CURRENT_TIMESTAMP),
+(15, 'member.alpha@student.local', '$2a$10$replace_with_real_bcrypt_hash_member15', 'Member Alpha', 7, 'PARTICIPANT', 'SE190012', 'FPT University HCMC', TRUE, 'ACTIVE', 3, CURRENT_TIMESTAMP),
+(16, 'member.beta@student.local', '$2a$10$replace_with_real_bcrypt_hash_member16', 'Member Beta', 7, 'PARTICIPANT', 'SE190013', 'FPT University HCMC', TRUE, 'ACTIVE', 3, CURRENT_TIMESTAMP),
+(17, 'member.gamma@student.local', '$2a$10$replace_with_real_bcrypt_hash_member17', 'Member Gamma', 7, 'PARTICIPANT', 'SE190014', 'FPT University HCMC', TRUE, 'ACTIVE', 3, CURRENT_TIMESTAMP),
+(18, 'member.delta@student.local', '$2a$10$replace_with_real_bcrypt_hash_member18', 'Member Delta', 7, 'PARTICIPANT', 'SE190015', 'FPT University HCMC', TRUE, 'ACTIVE', 3, CURRENT_TIMESTAMP);
+
+INSERT INTO events
+(id, name, slug, event_type, discipline_id, term_plan_id, description,
+ registration_start, registration_end, status, owner_coordinator_id, created_by,
+ submitted_at, approved_by, approved_at)
+VALUES
+(3, 'SEAL Product Showcase Summer 2026',
+ 'seal-product-showcase-summer-2026',
+ 'SUMMER',
+ 1,
+ 1,
+ 'Extra demo event for slide-only and full-artifact submission scenarios.',
+ '2026-06-10 08:00:00',
+ '2026-06-22 23:59:59',
+ 'IN_PROGRESS',
+ 3,
+ 3,
+ '2026-05-25 09:00:00',
+ 2,
+ '2026-05-26 10:00:00');
+
+INSERT INTO categories
+(id, event_id, name, description, mentor_id, is_active)
+VALUES
+(5, 3, 'Product Showcase', 'Presentation-focused product pitching track', 6, TRUE);
+
+INSERT INTO rounds
+(id, event_id, name, order_number, submission_deadline, status, promotion_top_n, is_final_round,
+ requires_repo, requires_demo, requires_slide, requires_report)
+VALUES
+(3, 3, 'Pitch Round', 1, '2026-07-12 23:59:59', 'OPEN_FOR_SUBMISSION', 2, FALSE,
+ FALSE, FALSE, TRUE, FALSE),
+(4, 3, 'Final Round', 2, '2026-07-20 23:59:59', 'OPEN_FOR_SUBMISSION', NULL, TRUE,
+ TRUE, TRUE, TRUE, TRUE);
+
+INSERT INTO teams
+(id, event_id, category_id, leader_id, name, description, status)
+VALUES
+(8, 3, 5, 13, 'Pitch Masters', 'Team focused on polished pitch decks.', 'ACTIVE'),
+(9, 3, 5, 14, 'Full Stackers', 'Team with full product and demo artifacts.', 'ACTIVE');
+
+INSERT INTO team_members
+(team_id, user_id, member_role, status, joined_at)
+VALUES
+(8, 13, 'LEADER', 'ACTIVE', '2026-06-11 09:00:00'),
+(8, 15, 'MEMBER', 'ACTIVE', '2026-06-11 09:05:00'),
+(8, 16, 'MEMBER', 'ACTIVE', '2026-06-11 09:10:00'),
+(9, 14, 'LEADER', 'ACTIVE', '2026-06-11 10:00:00'),
+(9, 17, 'MEMBER', 'ACTIVE', '2026-06-11 10:05:00'),
+(9, 18, 'MEMBER', 'ACTIVE', '2026-06-11 10:10:00');
+
+INSERT INTO judge_assignments
+(id, judge_id, event_id, round_id, category_id, assigned_by, status)
+VALUES
+(3, 4, 3, 3, 5, 3, 'ACTIVE'),
+(4, 5, 3, 3, 5, 3, 'ACTIVE'),
+(5, 4, 3, 4, 5, 3, 'ACTIVE'),
+(6, 5, 3, 4, 5, 3, 'ACTIVE');
+
+INSERT INTO submissions
+(id, team_id, round_id, submitted_by, attempt_number, repo_url, demo_url, slide_url,
+ report_url, change_note, status, submitted_at, github_metadata)
+VALUES
+(5, 8, 3, 13, 1,
+ NULL,
+ NULL,
+ 'https://docs.google.com/presentation/d/pitch-masters-v1',
+ NULL,
+ 'Pitch deck v1 for presentation round', 'SUBMITTED', '2026-07-01 09:00:00',
+ JSON_OBJECT('artifact_type', 'slide')),
+(6, 8, 3, 13, 2,
+ NULL,
+ NULL,
+ 'https://docs.google.com/presentation/d/pitch-masters-v2',
+ NULL,
+ 'Pitch deck v2 with updated story flow', 'SUBMITTED', '2026-07-03 09:15:00',
+ JSON_OBJECT('artifact_type', 'slide')),
+(7, 9, 3, 14, 1,
+ NULL,
+ NULL,
+ 'https://docs.google.com/presentation/d/full-stackers-v1',
+ NULL,
+ 'Pitch deck for comparison team', 'SUBMITTED', '2026-07-02 14:20:00',
+ JSON_OBJECT('artifact_type', 'slide')),
+(8, 8, 4, 13, 1,
+ 'https://github.com/demo/pitch-masters',
+ 'https://demo.seal.local/pitch-masters',
+ 'https://docs.google.com/presentation/d/pitch-masters-final',
+ 'https://docs.google.com/document/d/pitch-masters-report',
+ 'Final round package for promoted team', 'SUBMITTED', '2026-07-14 11:30:00',
+ JSON_OBJECT('artifact_type', 'full_package'));
+
+INSERT INTO rankings
+(id, event_id, round_id, category_id, team_id, total_score, rank_position, is_promoted, computed_by, snapshot_note)
+VALUES
+(5, 3, 3, 5, 8, 91.250, 1, TRUE, 3, 'Pitch round ranking for presentation event.'),
+(6, 3, 3, 5, 9, 84.500, 2, FALSE, 3, 'Pitch round ranking for presentation event.');
+
+INSERT INTO notifications
+(recipient_id, event_id, notification_type, title, message, is_read)
+VALUES
+(13, 3, 'SUBMISSION_RECEIVED', 'Pitch Round submission received',
+ 'Your slide submission for Pitch Round has been recorded.', FALSE),
+(14, 3, 'SUBMISSION_RECEIVED', 'Pitch Round submission received',
+ 'Your slide submission for Pitch Round has been recorded.', FALSE);
 
     -- Trao giải thưởng cho EVENT 2
 -- Sử dụng Subquery tương tự cho Event 2 để đảm bảo an toàn dữ liệu

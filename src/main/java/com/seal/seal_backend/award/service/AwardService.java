@@ -15,8 +15,10 @@ public interface AwardService {
     // Lấy danh sách giải thưởng của một Sự kiện
     List<AwardResponse> getAwardsByEvent(Long eventId);
 
+    List<Map<String, Object>> getCategoriesByEvent(Long eventId);
+
     @Transactional(readOnly = true)
-    List<Map<String, Object>> getEligibleTeamsForAward(Long eventId);
+    List<Map<String, Object>> getEligibleTeamsForAward(Long eventId, Long categoryId);
 
     @Transactional
     void publishEventResults(Long eventId, Long userId);

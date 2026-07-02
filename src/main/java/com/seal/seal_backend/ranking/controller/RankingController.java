@@ -4,8 +4,12 @@ import com.seal.seal_backend.common.api.ApiResponse;
 import com.seal.seal_backend.common.security.CurrentUser;
 import com.seal.seal_backend.domain.repository.RoundRepository;
 import com.seal.seal_backend.domain.repository.SubmissionRepository;
+import com.seal.seal_backend.ranking.dto.response.CategoryResponse;
+import com.seal.seal_backend.ranking.dto.response.DisqualifiedTeamResponse;
 import com.seal.seal_backend.ranking.dto.response.RankingResponse;
+import com.seal.seal_backend.ranking.dto.response.ScoreBreakdownResponse;
 import com.seal.seal_backend.ranking.service.RankingService;
+import com.seal.seal_backend.ranking.service.impl.RankingServiceImpl;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -32,14 +36,23 @@ public class RankingController {
         return ResponseEntity.ok(ApiResponse.ok("Ranking module is running!"));
     }
 
+    @GetMapping("/events/{eventId}/categories")
+    @Operation(summary = "Lấy danh sách các hạng mục (Category) của sự kiện")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<List<CategoryResponse>>> getCategories(@PathVariable Long eventId) {
+        List<CategoryResponse> categories = rankingService.getCategoriesByEvent(eventId);
+        return ResponseEntity.ok(ApiResponse.ok(categories));
+    }
+
     @PostMapping("/rounds/{roundId}/compute")
-    @Operation(summary = "Kích hoạt tính toán điểm và xếp hạng cho một vòng thi")
+    @Operation(summary = "Kích hoạt tính toán điểm và xếp hạng (hỗ trợ lọc theo Hạng mục/Category)")
     @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
     public ResponseEntity<ApiResponse<List<RankingResponse>>> computeRanking(
             @PathVariable Long roundId,
+            @RequestParam(required = false, defaultValue = "0") Long categoryId, // Thêm dòng này
             @CurrentUser Long userId
     ) {
-        List<RankingResponse> rankings = rankingService.computeRankingForRound(roundId, userId);
+        List<RankingResponse> rankings = rankingService.computeRankingForRound(roundId, categoryId, userId);
         return ResponseEntity.ok(ApiResponse.ok(rankings));
     }
 
@@ -67,8 +80,8 @@ public class RankingController {
     @GetMapping("/events/{eventId}/disqualified")
     @Operation(summary = "Lấy danh sách các đội bị đình chỉ trong sự kiện")
     @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
-    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getDisqualifiedTeams(@PathVariable Long eventId) {
-        List<Map<String, Object>> disqualifiedTeams = rankingService.getDisqualifiedTeams(eventId);
+    public ResponseEntity<ApiResponse<List<DisqualifiedTeamResponse>>> getDisqualifiedTeams(@PathVariable Long eventId) {
+        List<DisqualifiedTeamResponse> disqualifiedTeams = rankingService.getDisqualifiedTeams(eventId);
         return ResponseEntity.ok(ApiResponse.ok(disqualifiedTeams));
     }
 
@@ -84,5 +97,16 @@ public class RankingController {
         rankingService.promoteTeamsToNextRound(roundId, teamIds);
 
         return ResponseEntity.ok(ApiResponse.ok("Đã chuyển các đội vào vòng tiếp theo thành công!"));
+    }
+
+    @GetMapping("/teams/{teamId}/rounds/{roundId}/breakdown")
+    @Operation(summary = "Xem chi tiết bảng điểm (Score Breakdown) của một đội thi trong một vòng")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<List<ScoreBreakdownResponse>>> getScoreBreakdown(
+            @PathVariable Long teamId,
+            @PathVariable Long roundId
+    ) {
+        List<ScoreBreakdownResponse> breakdown = rankingService.getScoreBreakdown(teamId, roundId);
+        return ResponseEntity.ok(ApiResponse.ok(breakdown));
     }
 }

@@ -138,11 +138,49 @@ class EventServiceImplTest {
     class AddRound {
 
         @Test
+        void artifactRequirementsArePersisted() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.save(any(Round.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            RoundResponse response = service.addRound(1L, new CreateRoundRequest(
+                    "Presentation", 1, null, null, false,
+                    false, false, true, true));
+
+            assertThat(response.requiresRepo()).isFalse();
+            assertThat(response.requiresDemo()).isFalse();
+            assertThat(response.requiresSlide()).isTrue();
+            assertThat(response.requiresReport()).isTrue();
+        }
+
+        @Test
+        void updateCanChangeArtifactRequirementsIndependently() {
+            Round round = new Round();
+            round.setId(2L);
+            round.setEvent(sampleEvent);
+            round.setName("Round");
+            round.setOrderNumber(1);
+            round.setRequiresRepo(true);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findById(2L)).thenReturn(Optional.of(round));
+            when(roundRepository.save(round)).thenReturn(round);
+
+            RoundResponse response = service.updateRound(1L, 2L, new UpdateRoundRequest(
+                    null, null, null, null,
+                    false, null, true, null));
+
+            assertThat(response.requiresRepo()).isFalse();
+            assertThat(response.requiresDemo()).isFalse();
+            assertThat(response.requiresSlide()).isTrue();
+            assertThat(response.requiresReport()).isFalse();
+        }
+
+        @Test
         void duplicateOrderNumber_throws_BR_EVT_02() {
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
             when(roundRepository.existsByEventIdAndOrderNumber(1L, 1)).thenReturn(true);
 
-            CreateRoundRequest req = new CreateRoundRequest("Round 1", 1, null, null, false);
+            CreateRoundRequest req = new CreateRoundRequest(
+                    "Round 1", 1, null, null, false, true, false, false, false);
 
             assertThatThrownBy(() -> service.addRound(1L, req))
                     .isInstanceOf(BusinessRuleException.class)
@@ -154,7 +192,8 @@ class EventServiceImplTest {
             when(eventRepository.findById(99L)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.addRound(99L,
-                    new CreateRoundRequest("R1", 1, null, null, false)))
+                    new CreateRoundRequest("R1", 1, null, null, false,
+                            true, false, false, false)))
                     .isInstanceOf(ResourceNotFoundException.class);
         }
     }
@@ -528,7 +567,8 @@ class EventServiceImplTest {
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
 
             assertThatThrownBy(() -> service.addRound(1L,
-                    new CreateRoundRequest("R1", 1, null, null, false)))
+                    new CreateRoundRequest("R1", 1, null, null, false,
+                            true, false, false, false)))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
         }

@@ -6,14 +6,11 @@ import com.seal.seal_backend.common.security.CurrentUser;
 import com.seal.seal_backend.submission.dto.request.*;
 import com.seal.seal_backend.submission.dto.response.SubmissionDetailResponseDTO;
 import com.seal.seal_backend.submission.dto.response.SubmissionMyOverviewResponseDTO;
-import com.seal.seal_backend.submission.dto.response.SubmissionResponseDTO;
-import com.seal.seal_backend.submission.dto.response.SubmissionVersionResponseDTO;
 import com.seal.seal_backend.submission.service.SubmissionService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.GrantedAuthority;
@@ -35,62 +32,11 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SubmissionController {
 
-    @Autowired
     private final SubmissionService submissionService;
 
     @GetMapping("/ping")
     public ApiResponse<String> ping() {
         return ApiResponse.ok("Submission Tracking module is alive");
-    }
-
-    @PreAuthorize("hasRole('TEAM_LEADER')")
-    @PostMapping("/drafts")
-    public ResponseEntity<ApiResponse<SubmissionDetailResponseDTO>> createDraft(
-            @Valid @RequestBody CreateDraftSubmissionRequestDTO request,
-            @CurrentUser UserPrincipal user
-    ) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(submissionService.createDraft(request, user.getId())));
-    }
-
-    @PreAuthorize("hasRole('TEAM_LEADER')")
-    @PutMapping("/{id}/draft")
-    public ResponseEntity<ApiResponse<SubmissionDetailResponseDTO>> updateDraft(
-            @PathVariable Long id,
-            @Valid @RequestBody UpdateDraftSubmissionRequestDTO request,
-            @CurrentUser UserPrincipal user
-    ) {
-        return ResponseEntity.ok(
-                ApiResponse.ok(submissionService.updateDraft(id, request, user.getId()))
-        );
-    }
-
-    @PreAuthorize("hasRole('TEAM_LEADER')")
-    @PostMapping("/{id}/submit")
-    public ResponseEntity<ApiResponse<SubmissionDetailResponseDTO>> submit(
-            @PathVariable Long id,
-            @Valid @RequestBody(required = false) SubmitSubmissionRequestDTO request,
-            @CurrentUser UserPrincipal user
-    ) {
-        SubmitSubmissionRequestDTO safeRequest =
-                request != null ? request : new SubmitSubmissionRequestDTO();
-        return ResponseEntity.ok(
-                ApiResponse.ok(submissionService.submit(id, safeRequest, user.getId()))
-        );
-    }
-
-    @PreAuthorize("hasRole('TEAM_LEADER')")
-    @PostMapping("/{id}/resubmit")
-    public ResponseEntity<ApiResponse<SubmissionDetailResponseDTO>> resubmit(
-            @PathVariable Long id,
-            @Valid @RequestBody(required = false) SubmitSubmissionRequestDTO request,
-            @CurrentUser UserPrincipal user
-    ) {
-        SubmitSubmissionRequestDTO safeRequest =
-                request != null ? request : new SubmitSubmissionRequestDTO();
-        return ResponseEntity.ok(
-                ApiResponse.ok(submissionService.resubmit(id, safeRequest, user.getId()))
-        );
     }
 
     @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER', 'COORDINATOR', 'SUPER_COORDINATOR', 'ADMIN')")
@@ -122,13 +68,12 @@ public class SubmissionController {
 
     @PreAuthorize("hasRole('TEAM_LEADER')")
     @PostMapping
-    public ResponseEntity<SubmissionResponseDTO> createSubmission(
-            @RequestBody CreateSubmissionRequestDTO request,
-            @RequestParam Long userId
+    public ResponseEntity<ApiResponse<SubmissionDetailResponseDTO>> createSubmission(
+            @Valid @RequestBody CreateSubmissionRequestDTO request,
+            @CurrentUser UserPrincipal user
     ) {
-        return ResponseEntity.ok(
-                submissionService.createSubmission(request, userId)
-        );
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(submissionService.createSubmission(request, user.getId())));
     }
 
     @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER', 'COORDINATOR', 'SUPER_COORDINATOR', 'ADMIN')")
@@ -145,101 +90,19 @@ public class SubmissionController {
         );
     }
 
-    @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER')")
-    @GetMapping("/{id}/current-version")
-    public ResponseEntity<SubmissionVersionResponseDTO>
-    getCurrentVersion(@PathVariable Long id) {
-
-        return ResponseEntity.ok(
-                submissionService.getCurrentVersion(id)
-        );
-    }
-
     @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER', 'COORDINATOR', 'SUPER_COORDINATOR', 'ADMIN')")
-    @GetMapping("/{id}/versions")
-    public ResponseEntity<ApiResponse<List<SubmissionVersionResponseDTO>>>
-    getVersions(@PathVariable Long id, @CurrentUser UserPrincipal user) {
-
+    @GetMapping("/history")
+    public ResponseEntity<ApiResponse<List<SubmissionDetailResponseDTO>>> getHistory(
+            @RequestParam Long teamId,
+            @RequestParam Long roundId,
+            @CurrentUser UserPrincipal user) {
         return ResponseEntity.ok(
-                ApiResponse.ok(submissionService.getVersions(
-                        id,
+                ApiResponse.ok(submissionService.getHistory(
+                        teamId,
+                        roundId,
                         user.getId(),
                         isStaffViewer(user)
                 ))
-        );
-    }
-
-    @PreAuthorize("hasRole('TEAM_LEADER')")
-    @PostMapping("/{id}/versions")
-    public ResponseEntity<SubmissionVersionResponseDTO>
-    createVersion(
-            @PathVariable Long id,
-            @RequestBody CreateVersionRequestDTO request,
-            @RequestParam Long userId
-    ) {
-
-        return ResponseEntity.ok(
-                submissionService.createVersion(
-                        id,
-                        request,
-                        userId
-                )
-        );
-    }
-
-    @PatchMapping("/{id}/status")
-    public ResponseEntity<Void> updateStatus(
-            @PathVariable Long id,
-            @RequestBody UpdateStatusRequestDTO request
-    ) {
-
-        submissionService.updateStatus(
-                id,
-                request.getStatus()
-        );
-
-        return ResponseEntity.ok().build();
-    }
-
-
-    @PutMapping("/versions/{versionId}")
-    public ResponseEntity<SubmissionVersionResponseDTO>
-    updateVersion(
-            @PathVariable Long versionId,
-            @RequestBody UpdateSubmissionVersionRequestDTO request
-    ) {
-
-        return ResponseEntity.ok(
-                submissionService.updateVersion(
-                        versionId,
-                        request
-                )
-        );
-    }
-
-    @PreAuthorize("hasRole('TEAM_LEADER')")
-    @PatchMapping("/{submissionId}/select-version")
-    public ResponseEntity<Void> selectVersion(
-            @PathVariable Long submissionId,
-            @Valid @RequestBody SelectSubmissionVersionRequestDTO request,
-            @CurrentUser UserPrincipal user
-    ) {
-
-        submissionService.selectCurrentVersion(
-                submissionId,
-                request.getVersionId(),
-                user.getId()
-        );
-
-        return ResponseEntity.ok().build();
-    }
-
-    @GetMapping
-    public ResponseEntity<List<SubmissionDetailResponseDTO>>
-    getAllSubmissions() {
-
-        return ResponseEntity.ok(
-                submissionService.getAllSubmissions()
         );
     }
 

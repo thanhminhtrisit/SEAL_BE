@@ -219,6 +219,10 @@ public class EventServiceImpl implements EventService {
         round.setSubmissionDeadline(req.submissionDeadline());
         round.setPromotionTopN(req.promotionTopN());
         round.setIsFinalRound(req.finalRound());
+        round.setRequiresRepo(req.requiresRepo() != null ? req.requiresRepo() : true);
+        round.setRequiresDemo(Boolean.TRUE.equals(req.requiresDemo()));
+        round.setRequiresSlide(Boolean.TRUE.equals(req.requiresSlide()));
+        round.setRequiresReport(Boolean.TRUE.equals(req.requiresReport()));
         round.setStatus(RoundStatus.DRAFT);
 
         return RoundResponse.from(roundRepository.save(round));
@@ -251,6 +255,10 @@ public class EventServiceImpl implements EventService {
         if (req.submissionDeadline() != null) round.setSubmissionDeadline(req.submissionDeadline());
         if (req.promotionTopN() != null) round.setPromotionTopN(req.promotionTopN());
         if (req.finalRound() != null) round.setIsFinalRound(req.finalRound());
+        if (req.requiresRepo() != null) round.setRequiresRepo(req.requiresRepo());
+        if (req.requiresDemo() != null) round.setRequiresDemo(req.requiresDemo());
+        if (req.requiresSlide() != null) round.setRequiresSlide(req.requiresSlide());
+        if (req.requiresReport() != null) round.setRequiresReport(req.requiresReport());
 
         return RoundResponse.from(roundRepository.save(round));
     }

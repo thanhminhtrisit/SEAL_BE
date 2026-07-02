@@ -35,7 +35,11 @@ public class EventQueryAdapter implements EventQueryPort {
                 r.getStatus(),
                 r.getSubmissionDeadline(),
                 r.getPromotionTopN(),
-                r.getIsFinalRound()
+                r.getIsFinalRound(),
+                r.getRequiresRepo(),
+                r.getRequiresDemo(),
+                r.getRequiresSlide(),
+                r.getRequiresReport()
         ));
     }
 

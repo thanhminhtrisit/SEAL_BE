@@ -13,6 +13,10 @@ public record RoundResponse(
         RoundStatus status,
         Integer promotionTopN,
         boolean finalRound,
+        boolean requiresRepo,
+        boolean requiresDemo,
+        boolean requiresSlide,
+        boolean requiresReport,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -21,6 +25,8 @@ public record RoundResponse(
                 r.getId(), r.getEvent().getId(), r.getName(), r.getOrderNumber(),
                 r.getSubmissionDeadline(), r.getStatus(),
                 r.getPromotionTopN(), r.getIsFinalRound(),
+                r.getRequiresRepo(), r.getRequiresDemo(),
+                r.getRequiresSlide(), r.getRequiresReport(),
                 r.getCreatedAt(), r.getUpdatedAt()
         );
     }

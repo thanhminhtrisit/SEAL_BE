@@ -44,7 +44,7 @@ Các file/thư mục dưới đây **không sửa tự do**. Muốn đổi → m
 | Module | Cần đọc dữ liệu của | Phụ thuộc qua |
 |---|---|---|
 | submission (M2) | round (M1), team (M1) | `EventQueryPort`, `TeamQueryPort` |
-| scoring (M2) | round + criteria (M1), submission version (M2) | `EventQueryPort`, `SubmissionQueryPort` |
+| scoring (M2) | round + criteria (M1), submitted attempt (M2) | `EventQueryPort`, `SubmissionQueryPort` |
 | ranking (M3) | scores (M2), team (M1) | `ScoringQueryPort`, `TeamQueryPort` |
 | award (M3) | ranking (M3), team (M1) | `RankingQueryPort`, `TeamQueryPort` |
 

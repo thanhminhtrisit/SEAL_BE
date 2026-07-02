@@ -4,7 +4,7 @@
 
 1. **DB:** tạo schema từ nguồn sự thật (đã gồm seed data):
    ```bash
-   mysql -u root -p < db/schema.sql      # tạo database seal_db trên cổng trong .env (mặc định 3307)
+   mysql -u root -p < db/schema.sql      # tạo database seal_db_hailq trên cổng trong .env (mặc định 3307)
    ```
 2. **Cấu hình:** copy/sửa `.env` (DB_URL, DB_USERNAME, DB_PASSWORD, JWT_SECRET...).
    > `application.yaml` đặt `ddl-auto: none` — Hibernate **không** tự đổi DB; schema do `db/schema.sql` quản lý. Chỉ đổi sang `validate` khi entity đã ổn định 100%.
