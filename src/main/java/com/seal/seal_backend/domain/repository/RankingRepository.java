@@ -12,11 +12,9 @@ import java.util.List;
 @Repository
 public interface RankingRepository extends JpaRepository<Ranking, Long> {
 
-    // Tìm qua thuộc tính 'round.id' thay vì 'roundId'
     @Query("SELECT r FROM Ranking r WHERE r.round.id = :roundId ORDER BY r.rankPosition ASC")
     List<Ranking> findByRoundIdOrderByRankPositionAsc(@Param("roundId") Long roundId);
 
-    // Xóa thông qua object round
     @Modifying
     @Query("DELETE FROM Ranking r WHERE r.round.id = :roundId")
     void deleteByRoundId(@Param("roundId") Long roundId);
@@ -24,4 +22,8 @@ public interface RankingRepository extends JpaRepository<Ranking, Long> {
     boolean existsByRoundIdAndTeamIdAndIsPromotedTrue(Long roundId, Long teamId);
 
     boolean existsByRoundIdAndTeamId(Long roundId, Long teamId);
+
+    @Modifying
+    @Query("UPDATE Ranking r SET r.isPromoted = true WHERE r.round.id = :roundId AND r.team.id IN :teamIds")
+    void markTeamsAsPromoted(Long roundId, List<Long> teamIds);
 }

@@ -80,7 +80,7 @@ public class AwardServiceImpl implements AwardService {
                         a.getId(),
                         a.getEvent().getId(),
                         a.getTeam().getId(),
-                        "Team-" + a.getTeam().getId(),
+                        a.getTeam().getName(),
                         a.getAwardType(),
                         a.getDescription(),
                         a.getAwardedBy().getId(),
@@ -92,17 +92,27 @@ public class AwardServiceImpl implements AwardService {
     @Transactional(readOnly = true)
     @Override
     public List<Map<String, Object>> getEligibleTeamsForAward(Long eventId, Long categoryId) {
-        // Sửa lại câu SQL để JOIN hoặc filter theo category_id
-        String sql = "SELECT t.id AS teamId, t.name AS teamName, " +
-                "rk.rank_position AS rankPosition, rk.total_score AS totalScore " +
-                "FROM rankings rk " +
-                "JOIN teams t ON rk.team_id = t.id " +
-                "JOIN rounds r ON rk.round_id = r.id " +
-                "WHERE r.event_id = ? AND r.name = 'Final Round' " +
-                "AND t.category_id = ? " + // BỔ SUNG ĐIỀU KIỆN NÀY (Tùy thuộc vào Database Schema của bạn)
-                "ORDER BY rk.rank_position ASC";
+        String roundSql = "SELECT id FROM rounds " +
+            "WHERE event_id = ? " +
+            "ORDER BY is_final_round DESC, order_number DESC, id DESC " +
+            "LIMIT 1";
 
-        List<Map<String, Object>> rawResult = jdbcTemplate.queryForList(sql, eventId, categoryId);
+        List<Map<String, Object>> roundRows = jdbcTemplate.queryForList(roundSql, eventId);
+        if (roundRows.isEmpty()) {
+            return List.of();
+        }
+
+        Long eligibleRoundId = ((Number) roundRows.get(0).get("id")).longValue();
+
+        String sql = "SELECT t.id AS teamId, t.name AS teamName, " +
+            "rk.rank_position AS rankPosition, rk.total_score AS totalScore " +
+            "FROM rankings rk " +
+            "JOIN teams t ON rk.team_id = t.id " +
+            "WHERE rk.round_id = ? " +
+            "AND t.category_id = ? " +
+            "ORDER BY rk.rank_position ASC";
+
+        List<Map<String, Object>> rawResult = jdbcTemplate.queryForList(sql, eligibleRoundId, categoryId);
 
         return rawResult.stream().map(row -> {
             Map<String, Object> formattedRow = new HashMap<>();

@@ -31,8 +31,6 @@ public class RankingServiceImpl implements RankingService {
     private final RankingDataProvider dataProvider;
     private final JdbcTemplate jdbcTemplate;
 
-    // ĐÃ XÓA 2 RECORD NỘI BỘ Ở ĐÂY ĐỂ TRÁNH TRÙNG LẶP VỚI FILE BÊN NGOÀI
-
     private static class TeamScoreData {
         RankingDataProvider.TeamView team;
         double totalScore;
@@ -59,7 +57,6 @@ public class RankingServiceImpl implements RankingService {
 
         List<RankingDataProvider.TeamView> allTeams = dataProvider.getTeamsInRound(roundId);
 
-        // LỌC TEAM THÔNG MINH: Chỉ lấy những team thuộc Category đang chọn (hoặc lấy hết nếu categoryId = 0)
         List<RankingDataProvider.TeamView> validTeams = allTeams.stream()
                 .filter(team -> !"DISQUALIFIED".equals(team.status()))
                 .filter(team -> {
@@ -76,8 +73,6 @@ public class RankingServiceImpl implements RankingService {
 
         List<TeamScoreData> rankedTeamsData = calculateAndSortRankings(validTeams, criteria, allScores);
 
-        // XÓA DỮ LIỆU CŨ CÓ CHỌN LỌC (Targeted Deletion)
-        // Tuyệt đối không xóa toàn bộ Round nếu người dùng chỉ đang tính điểm cho 1 Category
         if (categoryId == null || categoryId == 0) {
             log.info("Xóa toàn bộ bảng xếp hạng cũ của vòng thi: {}", roundId);
             rankingRepository.deleteByRoundId(roundId);
@@ -140,7 +135,6 @@ public class RankingServiceImpl implements RankingService {
                 categoryScores.add(new TeamScoreData(team, finalScore, avgScoreByCriterion));
             }
 
-            // Sắp xếp thứ hạng nội bộ của danh sách theo cơ chế Tie-breaker 4 tầng
             categoryScores.sort((d1, d2) -> {
                 int cmp = Double.compare(d2.totalScore, d1.totalScore);
                 if (cmp != 0) return cmp;
@@ -173,7 +167,6 @@ public class RankingServiceImpl implements RankingService {
     private List<Ranking> saveRankingsToDatabase(List<TeamScoreData> rankedTeamsData, Round currentRound, Long userId) {
         List<Ranking> entitiesToSave = new ArrayList<>();
 
-        // Khởi tạo bộ đếm hạng riêng biệt cho từng Category ID
         Map<Long, Integer> categoryRankCounter = new HashMap<>();
 
         for (TeamScoreData data : rankedTeamsData) {
@@ -288,9 +281,7 @@ public class RankingServiceImpl implements RankingService {
         log.info("Đã đóng băng trạng thái (Soft Delete) {} bài nộp placeholder của đội vi phạm.", updatedCount);
     }
 
-    // =========================================================================
-    // MỤC TIÊU 2: THAY THẾ TOÀN BỘ MAP<STRING, OBJECT> BẰNG CẤU TRÚC JAVA RECORD DTO
-    // =========================================================================
+
     @Override
     @Transactional(readOnly = true)
     public List<DisqualifiedTeamResponse> getDisqualifiedTeams(Long eventId) {
@@ -328,21 +319,31 @@ public class RankingServiceImpl implements RankingService {
     @Override
     @Transactional
     public void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds) {
+        if (teamIds == null || teamIds.isEmpty()) {
+            return;
+        }
+
         Round current = roundRepository.findById(currentRoundId)
                 .orElseThrow(() -> new RuntimeException("Round không tồn tại"));
 
         List<Round> nextRounds = roundRepository.findNextRounds(current.getEvent().getId(), current.getOrderNumber());
-        Round nextRound = nextRounds.isEmpty() ? null : nextRounds.get(0);
-
-        if (nextRound == null) {
+        if (nextRounds.isEmpty()) {
             throw new RuntimeException("Đây đã là vòng thi cuối cùng, không thể thăng hạng!");
         }
+        Round nextRound = nextRounds.get(0);
 
-        for (Long teamId : teamIds) {
-            if (!submissionRepository.existsByTeamIdAndRoundId(teamId, nextRound.getId())) {
-                submissionRepository.createPlaceholderSubmission(teamId, nextRound.getId());
-            }
+        rankingRepository.markTeamsAsPromoted(currentRoundId, teamIds);
+
+        List<Long> existingTeamIds = submissionRepository.findExistingSubmissionTeamIds(nextRound.getId(), teamIds);
+
+        List<Long> teamsToCreate = teamIds.stream()
+                .filter(id -> !existingTeamIds.contains(id))
+                .collect(Collectors.toList());
+
+        for (Long teamId : teamsToCreate) {
+            submissionRepository.createPlaceholderSubmission(teamId, nextRound.getId());
         }
+
         log.info("Đã thăng hạng thành công {} đội sang vòng {}", teamIds.size(), nextRound.getName());
     }
 }

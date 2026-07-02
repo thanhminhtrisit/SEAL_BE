@@ -12,13 +12,11 @@ public class RankingDataProvider {
 
     private final JdbcTemplate jdbcTemplate;
 
-    // 1. CẬP NHẬT RECORD: Thêm submissionTime
     public record TeamView(Long id, String name, String status, Long categoryId, String categoryName, LocalDateTime submissionTime) {}
     public record CriterionView(Long id, Double weight) {}
     public record ScoreView(Long teamId, Long criterionId, Double scoreValue) {}
 
     public List<TeamView> getTeamsInRound(Long roundId) {
-        // Lấy thêm s.created_at AS submission_time
         String sql = "SELECT t.id, t.name, t.status, t.category_id, c.name AS category_name, s.created_at AS submission_time " +
                 "FROM teams t " +
                 "JOIN submissions s ON s.team_id = t.id " +
