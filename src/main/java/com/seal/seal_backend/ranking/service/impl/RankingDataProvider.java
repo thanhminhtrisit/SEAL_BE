@@ -39,8 +39,8 @@ public class RankingDataProvider {
         return jdbcTemplate.query(sql, (rs, rowNum) -> new CriterionView(rs.getLong("id"), rs.getDouble("weight")), roundId);
     }
 
-    public List<ScoreView> getScoresForRound(Long roundId) {
-        String sql = "SELECT s.team_id, sc.criterion_id, sc.score_value FROM scores sc JOIN evaluations e ON e.id = sc.evaluation_id JOIN submission_versions sv ON sv.id = e.submission_version_id JOIN submissions s ON s.id = sv.submission_id WHERE e.round_id = ?";
+    public List<ScoreView> getScoresForRound    (Long roundId) {
+        String sql = "SELECT s.team_id, sc.criterion_id, sc.score_value FROM scores sc JOIN evaluations e ON e.id = sc.evaluation_id JOIN submissions s ON s.id = e.submission_id WHERE e.round_id = ?";
         return jdbcTemplate.query(sql, (rs, rowNum) -> new ScoreView(rs.getLong("team_id"), rs.getLong("criterion_id"), rs.getDouble("score_value")), roundId);
     }
 }

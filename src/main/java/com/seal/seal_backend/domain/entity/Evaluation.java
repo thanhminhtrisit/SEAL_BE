@@ -11,15 +11,15 @@ import java.math.BigDecimal;
 import com.seal.seal_backend.domain.enums.EvaluationStatus;
 @Entity @Table(name = "evaluations")
 @Getter @Setter @NoArgsConstructor
-public class Evaluation {
+public class    Evaluation {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "judge_assignment_id")
     private JudgeAssignment judgeAssignment;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "judge_id", nullable = false)
     private User judge;
-    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "submission_version_id", nullable = false)
-    private SubmissionVersion submissionVersion;
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "submission_id", nullable = false)
+    private Submission submission;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "round_id", nullable = false)
     private Round round;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 30)

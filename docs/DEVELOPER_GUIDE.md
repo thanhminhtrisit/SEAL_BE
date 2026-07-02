@@ -79,7 +79,7 @@ src/main/java/com/seal/seal_backend/
 └── notification/  ← M3     # FR-AWD-02 thông báo kết quả
 ```
 
-**Vì sao chia kiểu này (Hybrid):** code viết hằng ngày (controller/service/dto) nằm gọn trong module của từng người → ít chạm file của nhau → ít conflict. Còn entity/enums/repository để **tập trung** ở `domain/` vì schema có FK chéo module rất dày (vd `Evaluation → SubmissionVersion + ScoringCriterion + Round + User`); để chung giúp `@ManyToOne` đơn giản, tránh phụ thuộc vòng giữa các module.
+**Vì sao chia kiểu này (Hybrid):** code viết hằng ngày (controller/service/dto) nằm gọn trong module của từng người → ít chạm file của nhau → ít conflict. Còn entity/enums/repository để **tập trung** ở `domain/` vì schema có FK chéo module rất dày (vd `Evaluation → Submission + ScoringCriterion + Round + User`); để chung giúp `@ManyToOne` đơn giản, tránh phụ thuộc vòng giữa các module.
 
 ---
 

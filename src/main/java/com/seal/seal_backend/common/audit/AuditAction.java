@@ -2,6 +2,9 @@ package com.seal.seal_backend.common.audit;
 
 /** Actions that MUST be audit-logged (BR-AUD-02). Use as action_type in AuditLog. */
 public enum AuditAction {
+    EVALUATION_STARTED,
+    EVALUATION_UPDATED,
+    EVALUATION_SUBMITTED,
     SCORE_CREATED, SCORE_UPDATED,
     ROUND_LOCKED, ROUND_UNLOCKED,
     TEAM_APPROVED, TEAM_REJECTED,

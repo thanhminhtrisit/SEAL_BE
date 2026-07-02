@@ -8,14 +8,6 @@ import lombok.Setter;
 @Setter
 public class StartEvaluationRequest {
 
-    private Long judgeAssignmentId;
-
-    @NotNull(message = "Judge id is required")
-    private Long judgeId;
-
-    @NotNull(message = "Submission version id is required")
-    private Long submissionVersionId;
-
-    @NotNull(message = "Round id is required")
-    private Long roundId;
+    @NotNull(message = "Submission id is required")
+    private Long submissionId;
 }

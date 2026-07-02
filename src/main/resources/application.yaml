@@ -10,7 +10,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update   # SoT = db/schema.sql (run once). Was: update. Use validate only after entities are 100% stable.
+      ddl-auto: update # SoT = db/schema.sql. Reset the local DB with that script after destructive schema changes.
     show-sql: false
     properties:
       hibernate:

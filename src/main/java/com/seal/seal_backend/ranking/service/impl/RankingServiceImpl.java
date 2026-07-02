@@ -272,13 +272,12 @@ public class RankingServiceImpl implements RankingService {
         // Thực hiện cơ chế Soft Delete đóng băng bài nộp rỗng của các vòng kế tiếp phục vụ đối chứng tra cứu lịch sử
         String cancelSubmissionsSql =
                 "UPDATE submissions s " +
-                        "LEFT JOIN submission_versions sv ON s.id = sv.submission_id " +
-                        "LEFT JOIN evaluations e ON sv.id = e.submission_version_id " +
+                        "LEFT JOIN evaluations e ON s.id = e.submission_id " +
                         "SET s.status = 'DISQUALIFIED' " +
                         "WHERE s.team_id = ? AND e.id IS NULL";
 
         int updatedCount = jdbcTemplate.update(cancelSubmissionsSql, teamId);
-        log.info("Đã đóng băng trạng thái (Soft Delete) {} bài nộp placeholder của đội vi phạm.", updatedCount);
+        log.info("Marked {} unscored submissions as disqualified.", updatedCount);
     }
 
 
@@ -298,8 +297,7 @@ public class RankingServiceImpl implements RankingService {
                 "s.score_value AS scoreValue, s.comment AS judgeComment " +
                 "FROM scores s " +
                 "JOIN evaluations e ON s.evaluation_id = e.id " +
-                "JOIN submission_versions sv ON e.submission_version_id = sv.id " +
-                "JOIN submissions sub ON sv.submission_id = sub.id " +
+                "JOIN submissions sub ON e.submission_id = sub.id " +
                 "JOIN scoring_criteria sc ON s.criterion_id = sc.id " +
                 "JOIN users u ON e.judge_id = u.id " +
                 "WHERE sub.team_id = ? AND e.round_id = ? " +

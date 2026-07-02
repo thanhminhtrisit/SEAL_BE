@@ -18,8 +18,13 @@ public class SubmissionDetailResponseDTO {
     private Long categoryId;
     private String categoryName;
 
-    private Long currentVersionId;
-    private SubmissionVersionResponseDTO currentVersion;
+    private Integer attemptNumber;
+    private String repoUrl;
+    private String demoUrl;
+    private String slideUrl;
+    private String reportUrl;
+    private String changeNote;
+    private Long submittedBy;
 
     private String status;
 

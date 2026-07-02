@@ -1,12 +1,10 @@
 package com.seal.seal_backend.submission.service;
 
 import com.seal.seal_backend.domain.entity.Submission;
-import com.seal.seal_backend.domain.entity.SubmissionVersion;
 import com.seal.seal_backend.domain.enums.SubmissionStatus;
 import com.seal.seal_backend.domain.repository.SubmissionRepository;
-import com.seal.seal_backend.domain.repository.SubmissionVersionRepository;
 import com.seal.seal_backend.shared.contract.SubmissionQueryPort;
-import com.seal.seal_backend.shared.contract.dto.SubmissionVersionView;
+import com.seal.seal_backend.shared.contract.dto.SubmissionView;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,34 +18,18 @@ import java.util.Optional;
 public class SubmissionQueryAdapter implements SubmissionQueryPort {
 
     private final SubmissionRepository submissionRepository;
-    private final SubmissionVersionRepository submissionVersionRepository;
-
     @Override
     @Transactional(readOnly = true)
-    public Optional<SubmissionVersionView>
-    currentVersion(Long submissionId) {
-
-        Submission submission =
-                submissionRepository.findById(submissionId)
-                        .orElse(null);
-
-        if (submission == null ||
-                submission.getCurrentVersionId() == null) {
-
-            return Optional.empty();
-        }
-
-        return submissionVersionRepository
-                .findById(
-                        submission.getCurrentVersionId()
-                )
+    public Optional<SubmissionView> latestSubmittedAttempt(Long teamId, Long roundId) {
+        return submissionRepository
+                .findFirstByTeamIdAndRoundIdAndStatusOrderByAttemptNumberDesc(
+                        teamId, roundId, SubmissionStatus.SUBMITTED)
                 .map(this::toView);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<SubmissionVersionView>
-    currentVersionsForRound(Long roundId) {
+    public List<SubmissionView> latestSubmittedAttemptsForRound(Long roundId) {
 
         List<Submission> submissions =
                 submissionRepository
@@ -55,36 +37,24 @@ public class SubmissionQueryAdapter implements SubmissionQueryPort {
 
         return submissions.stream()
 
-                .filter(s ->
-                        s.getStatus()
-                                != SubmissionStatus.DISQUALIFIED)
-
-                .filter(s ->
-                        s.getCurrentVersionId() != null)
-
-                .map(Submission::getCurrentVersionId)
-
-                .map(submissionVersionRepository::findById)
-
-                .filter(Optional::isPresent)
-
-                .map(Optional::get)
-
+                .filter(s -> s.getStatus() == SubmissionStatus.SUBMITTED)
+                .collect(java.util.stream.Collectors.toMap(
+                        s -> s.getTeam().getId(),
+                        s -> s,
+                        (left, right) -> left.getAttemptNumber() >= right.getAttemptNumber() ? left : right))
+                .values().stream()
                 .map(this::toView)
 
                 .toList();
     }
 
-    private SubmissionVersionView toView(
-            SubmissionVersion version
-    ) {
-        return new SubmissionVersionView(
-                version.getId(),
-                version.getSubmission().getId(),
-                version.getSubmission().getTeam().getId(),
-                version.getSubmission().getRound().getId(),
-                version.getVersionNumber(),
-                version.getRepoUrl()
+    private SubmissionView toView(Submission submission) {
+        return new SubmissionView(
+                submission.getId(),
+                submission.getTeam().getId(),
+                submission.getRound().getId(),
+                submission.getAttemptNumber(),
+                submission.getRepoUrl()
         );
     }
 

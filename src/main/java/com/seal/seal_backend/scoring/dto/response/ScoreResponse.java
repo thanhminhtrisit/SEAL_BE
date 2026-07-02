@@ -14,6 +14,8 @@ public class ScoreResponse {
 
     private Long criterionId;
 
+    private Integer displayOrder;
+
     private String criterionName;
 
     private String criterionDescription;

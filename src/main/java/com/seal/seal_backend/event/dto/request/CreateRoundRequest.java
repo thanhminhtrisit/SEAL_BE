@@ -11,5 +11,9 @@ public record CreateRoundRequest(
         @NotNull @Min(1) Integer orderNumber,
         LocalDateTime submissionDeadline,
         Integer promotionTopN,
-        boolean finalRound
+        boolean finalRound,
+        Boolean requiresRepo,
+        Boolean requiresDemo,
+        Boolean requiresSlide,
+        Boolean requiresReport
 ) {}

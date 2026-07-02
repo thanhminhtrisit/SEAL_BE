@@ -11,5 +11,6 @@ public class SubmissionMyRoundOverviewDTO {
     private Integer orderNumber;
     private String status;
     private LocalDateTime submissionDeadline;
+    private SubmissionRequirementsDTO submissionRequirements;
     private SubmissionDetailResponseDTO submission;
 }

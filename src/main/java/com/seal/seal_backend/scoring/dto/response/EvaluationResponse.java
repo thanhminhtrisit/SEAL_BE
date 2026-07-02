@@ -18,9 +18,33 @@ public class EvaluationResponse {
 
     private Long judgeId;
 
-    private Long submissionVersionId;
+    private Long submissionId;
 
     private Long roundId;
+
+    private Long eventId;
+
+    private String eventName;
+
+    private Long teamId;
+
+    private String teamName;
+
+    private Long categoryId;
+
+    private String categoryName;
+
+    private Integer attemptNumber;
+
+    private String repoUrl;
+
+    private String demoUrl;
+
+    private String slideUrl;
+
+    private String reportUrl;
+
+    private Long submittedById;
 
     private EvaluationStatus status;
 
@@ -41,4 +65,6 @@ public class EvaluationResponse {
     private LocalDateTime updatedAt;
 
     private List<ScoreResponse> scores;
+
+    private List<ScoreResponse> criteria;
 }

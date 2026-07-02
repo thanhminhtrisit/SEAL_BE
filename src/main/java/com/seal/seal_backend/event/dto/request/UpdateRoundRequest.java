@@ -7,5 +7,9 @@ public record UpdateRoundRequest(
         @Size(max = 150) String name,
         LocalDateTime submissionDeadline,
         Integer promotionTopN,
-        Boolean finalRound
+        Boolean finalRound,
+        Boolean requiresRepo,
+        Boolean requiresDemo,
+        Boolean requiresSlide,
+        Boolean requiresReport
 ) {}
