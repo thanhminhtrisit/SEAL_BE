@@ -9,6 +9,7 @@ import com.seal.seal_backend.domain.entity.*;
 import com.seal.seal_backend.domain.enums.AssignmentStatus;
 import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.domain.enums.EventType;
+import com.seal.seal_backend.domain.enums.ResourceType;
 import com.seal.seal_backend.domain.enums.TermType;
 import com.seal.seal_backend.domain.repository.*;
 import com.seal.seal_backend.domain.enums.RoundStatus;
@@ -47,6 +48,7 @@ class EventServiceImplTest {
     @Mock JudgeAssignmentRepository judgeAssignmentRepository;
     @Mock EventBudgetRepository eventBudgetRepository;
     @Mock TeamRepository teamRepository;
+    @Mock CategoryResourceRepository categoryResourceRepository;
     @Mock AuditPublisher auditPublisher;
     @Mock JudgeQueryPort judgeQueryPort;
 
@@ -745,6 +747,114 @@ class EventServiceImplTest {
             assertThatThrownBy(() -> service.deleteCategory(1L, 20L))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
+        }
+    }
+
+    // ─── Category Resources ───────────────────────────────────────────────────
+
+    @Nested
+    class CategoryResources {
+
+        private Category sampleCategory;
+
+        @org.junit.jupiter.api.BeforeEach
+        void setup() {
+            sampleCategory = new Category();
+            sampleCategory.setId(10L);
+            sampleCategory.setEvent(sampleEvent);
+            sampleCategory.setName("Web Application");
+            sampleCategory.setIsActive(true);
+        }
+
+        @Test
+        void addResource_validRequest_savesAndReturns() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(sampleCategory));
+
+            CategoryResource saved = new CategoryResource();
+            saved.setId(1L);
+            saved.setCategory(sampleCategory);
+            saved.setUrl("https://dataset.example.com/data.csv");
+            saved.setResourceType(ResourceType.DATASET);
+            when(categoryResourceRepository.save(any())).thenReturn(saved);
+
+            var req = new CreateCategoryResourceRequest(null, "https://dataset.example.com/data.csv", ResourceType.DATASET);
+            var resp = service.addCategoryResource(1L, 10L, req);
+
+            assertThat(resp.id()).isEqualTo(1L);
+            assertThat(resp.resourceType()).isEqualTo(ResourceType.DATASET);
+            verify(categoryResourceRepository).save(any());
+        }
+
+        @Test
+        void addResource_categoryWrongEvent_throws_BR_RES_01() {
+            Event otherEvent = new Event();
+            otherEvent.setId(99L);
+            Category foreignCat = new Category();
+            foreignCat.setId(10L);
+            foreignCat.setEvent(otherEvent);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(foreignCat));
+
+            assertThatThrownBy(() -> service.addCategoryResource(1L, 10L,
+                    new CreateCategoryResourceRequest(null, "https://x.com", ResourceType.LINK)))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-RES-01");
+        }
+
+        @Test
+        void listResources_returnsAll() {
+            CategoryResource r1 = new CategoryResource();
+            r1.setId(1L); r1.setCategory(sampleCategory);
+            r1.setUrl("https://a.com"); r1.setResourceType(ResourceType.DOC);
+            CategoryResource r2 = new CategoryResource();
+            r2.setId(2L); r2.setCategory(sampleCategory);
+            r2.setUrl("https://b.com"); r2.setResourceType(ResourceType.SAMPLE);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(sampleCategory));
+            when(categoryResourceRepository.findByCategoryIdOrderByCreatedAtAsc(10L))
+                    .thenReturn(List.of(r1, r2));
+
+            var result = service.listCategoryResources(1L, 10L);
+
+            assertThat(result).hasSize(2);
+            assertThat(result.get(0).resourceType()).isEqualTo(ResourceType.DOC);
+        }
+
+        @Test
+        void deleteResource_wrongCategory_throws_BR_RES_02() {
+            Category otherCat = new Category();
+            otherCat.setId(99L);
+            otherCat.setEvent(sampleEvent);
+
+            CategoryResource resource = new CategoryResource();
+            resource.setId(5L);
+            resource.setCategory(otherCat);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(sampleCategory));
+            when(categoryResourceRepository.findById(5L)).thenReturn(Optional.of(resource));
+
+            assertThatThrownBy(() -> service.deleteCategoryResource(1L, 10L, 5L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-RES-02");
+        }
+
+        @Test
+        void deleteResource_valid_callsDeleteById() {
+            CategoryResource resource = new CategoryResource();
+            resource.setId(5L);
+            resource.setCategory(sampleCategory);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(sampleCategory));
+            when(categoryResourceRepository.findById(5L)).thenReturn(Optional.of(resource));
+
+            service.deleteCategoryResource(1L, 10L, 5L);
+
+            verify(categoryResourceRepository).deleteById(5L);
         }
     }
 

@@ -39,6 +39,7 @@ public class EventServiceImpl implements EventService {
     private final JudgeAssignmentRepository judgeAssignmentRepository;
     private final EventBudgetRepository eventBudgetRepository;
     private final TeamRepository teamRepository;
+    private final CategoryResourceRepository categoryResourceRepository;
     private final AuditPublisher auditPublisher;
     private final JudgeQueryPort judgeQueryPort;
 
@@ -539,6 +540,62 @@ public class EventServiceImpl implements EventService {
         }
 
         categoryRepository.deleteById(categoryId);
+    }
+
+    // ─── Category Resources ───────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public CategoryResourceResponse addCategoryResource(Long eventId, Long categoryId,
+                                                        CreateCategoryResourceRequest req) {
+        findEvent(eventId);
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
+        if (!category.getEvent().getId().equals(eventId)) {
+            throw new BusinessRuleException("BR-RES-01",
+                    "Category " + categoryId + " does not belong to event " + eventId);
+        }
+
+        CategoryResource resource = new CategoryResource();
+        resource.setCategory(category);
+        resource.setLabel(req.label());
+        resource.setUrl(req.url());
+        resource.setResourceType(req.resourceType());
+
+        return CategoryResourceResponse.from(categoryResourceRepository.save(resource));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CategoryResourceResponse> listCategoryResources(Long eventId, Long categoryId) {
+        findEvent(eventId);
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
+        if (!category.getEvent().getId().equals(eventId)) {
+            throw new BusinessRuleException("BR-RES-01",
+                    "Category " + categoryId + " does not belong to event " + eventId);
+        }
+        return categoryResourceRepository.findByCategoryIdOrderByCreatedAtAsc(categoryId)
+                .stream().map(CategoryResourceResponse::from).toList();
+    }
+
+    @Override
+    @Transactional
+    public void deleteCategoryResource(Long eventId, Long categoryId, Long resourceId) {
+        findEvent(eventId);
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
+        if (!category.getEvent().getId().equals(eventId)) {
+            throw new BusinessRuleException("BR-RES-01",
+                    "Category " + categoryId + " does not belong to event " + eventId);
+        }
+        CategoryResource resource = categoryResourceRepository.findById(resourceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Resource not found: " + resourceId));
+        if (!resource.getCategory().getId().equals(categoryId)) {
+            throw new BusinessRuleException("BR-RES-02",
+                    "Resource " + resourceId + " does not belong to category " + categoryId);
+        }
+        categoryResourceRepository.deleteById(resourceId);
     }
 
     // ─── Judge Assignment ─────────────────────────────────────────────────────

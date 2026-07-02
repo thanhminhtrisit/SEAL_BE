@@ -38,6 +38,11 @@ public interface EventService {
     CategoryResponse updateCategory(Long eventId, Long categoryId, UpdateCategoryRequest req);
     void deleteCategory(Long eventId, Long categoryId);
 
+    // --- Category Resources ---
+    CategoryResourceResponse addCategoryResource(Long eventId, Long categoryId, CreateCategoryResourceRequest req);
+    List<CategoryResourceResponse> listCategoryResources(Long eventId, Long categoryId);
+    void deleteCategoryResource(Long eventId, Long categoryId, Long resourceId);
+
     // --- Judge Assignment ---
     JudgeAssignmentResponse assignJudge(Long eventId, Long roundId, AssignJudgeRequest req, Long assignedById);
     void revokeJudge(Long eventId, Long roundId, Long assignmentId);

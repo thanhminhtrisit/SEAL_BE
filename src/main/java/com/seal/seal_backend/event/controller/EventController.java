@@ -230,6 +230,39 @@ public class EventController {
         return ApiResponse.ok("Category deleted.", null);
     }
 
+    // ─── Category Resources ───────────────────────────────────────────────────
+
+    @PostMapping("/{eventId}/categories/{categoryId}/resources")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Add a resource link to a category")
+    public ResponseEntity<ApiResponse<CategoryResourceResponse>> addCategoryResource(
+            @PathVariable Long eventId,
+            @PathVariable Long categoryId,
+            @Valid @RequestBody CreateCategoryResourceRequest req) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(eventService.addCategoryResource(eventId, categoryId, req)));
+    }
+
+    @GetMapping("/{eventId}/categories/{categoryId}/resources")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "List resource links for a category")
+    public ApiResponse<List<CategoryResourceResponse>> listCategoryResources(
+            @PathVariable Long eventId,
+            @PathVariable Long categoryId) {
+        return ApiResponse.ok(eventService.listCategoryResources(eventId, categoryId));
+    }
+
+    @DeleteMapping("/{eventId}/categories/{categoryId}/resources/{resourceId}")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Delete a resource link from a category")
+    public ApiResponse<Void> deleteCategoryResource(
+            @PathVariable Long eventId,
+            @PathVariable Long categoryId,
+            @PathVariable Long resourceId) {
+        eventService.deleteCategoryResource(eventId, categoryId, resourceId);
+        return ApiResponse.ok("Resource deleted.", null);
+    }
+
     // ─── Submit (FR-EVT-07) ───────────────────────────────────────────────────
 
     @PostMapping("/{eventId}/submit")
