@@ -56,13 +56,14 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     );
 
     // 🌟 SỬA ĐỔI: Chuyển trạng thái mặc định của Placeholder thành 'DRAFT' (Thay vì 'SUBMITTED')
-    // và thêm 'created_at' để tránh lỗi timestamp.
+    // và thêm các cột bắt buộc để tránh lỗi NOT NULL.
     @Modifying
-    @Query(value = "INSERT INTO submissions (team_id, round_id, status, created_at) " +
-            "VALUES (:teamId, :roundId, 'DRAFT', NOW())", nativeQuery = true)
+    @Query(value = "INSERT INTO submissions (team_id, round_id, submitted_by, attempt_number, status, created_at) " +
+            "VALUES (:teamId, :roundId, :submittedBy, 1, 'DRAFT', NOW())", nativeQuery = true)
     void createPlaceholderSubmission(
             @Param("teamId") Long teamId,
-            @Param("roundId") Long roundId
+            @Param("roundId") Long roundId,
+            @Param("submittedBy") Long submittedBy
     );
 
     // Kiểm tra xem đội đã có bài nộp ở vòng đó chưa

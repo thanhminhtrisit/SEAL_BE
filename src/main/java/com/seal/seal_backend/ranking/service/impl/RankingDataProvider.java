@@ -17,11 +17,12 @@ public class RankingDataProvider {
     public record ScoreView(Long teamId, Long criterionId, Double scoreValue) {}
 
     public List<TeamView> getTeamsInRound(Long roundId) {
-        String sql = "SELECT t.id, t.name, t.status, t.category_id, c.name AS category_name, s.created_at AS submission_time " +
+        String sql = "SELECT t.id, t.name, t.status, t.category_id, c.name AS category_name, MAX(s.created_at) AS submission_time " +
                 "FROM teams t " +
                 "JOIN submissions s ON s.team_id = t.id " +
                 "LEFT JOIN categories c ON t.category_id = c.id " +
-                "WHERE s.round_id = ?";
+            "WHERE s.round_id = ? " +
+            "GROUP BY t.id, t.name, t.status, t.category_id, c.name";
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> new TeamView(
                 rs.getLong("id"),

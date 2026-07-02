@@ -3,7 +3,6 @@ package com.seal.seal_backend.ranking.service.impl;
 import com.seal.seal_backend.domain.entity.*;
 import com.seal.seal_backend.domain.repository.RankingRepository;
 import com.seal.seal_backend.domain.repository.RoundRepository;
-import com.seal.seal_backend.domain.repository.SubmissionRepository;
 import com.seal.seal_backend.ranking.dto.response.CategoryResponse;
 import com.seal.seal_backend.ranking.dto.response.RankingResponse;
 import com.seal.seal_backend.ranking.dto.response.DisqualifiedTeamResponse;
@@ -27,7 +26,6 @@ public class RankingServiceImpl implements RankingService {
 
     private final RankingRepository rankingRepository;
     private final RoundRepository roundRepository;
-    private final SubmissionRepository submissionRepository;
     private final RankingDataProvider dataProvider;
     private final JdbcTemplate jdbcTemplate;
 
@@ -218,12 +216,17 @@ public class RankingServiceImpl implements RankingService {
 
     private List<RankingResponse> mapToRankingResponse(List<Ranking> savedEntities, List<RankingDataProvider.TeamView> validTeams) {
         Map<Long, String> teamNameMap = validTeams.stream()
-                .collect(Collectors.toMap(RankingDataProvider.TeamView::id, RankingDataProvider.TeamView::name));
+            .collect(Collectors.toMap(
+                RankingDataProvider.TeamView::id,
+                RankingDataProvider.TeamView::name,
+                (first, second) -> first));
 
         Map<Long, String> teamCategoryNameMap = validTeams.stream()
                 .collect(Collectors.toMap(
                         RankingDataProvider.TeamView::id,
                         t -> t.categoryName() != null ? t.categoryName() : "Chung"
+                ,
+                (first, second) -> first
                 ));
 
         return savedEntities.stream()
@@ -316,9 +319,12 @@ public class RankingServiceImpl implements RankingService {
 
     @Override
     @Transactional
-    public void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds) {
+    public void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds, Long userId) {
         if (teamIds == null || teamIds.isEmpty()) {
             return;
+        }
+        if (userId == null) {
+            throw new RuntimeException("Không xác định được người thực hiện thao tác thăng hạng");
         }
 
         Round current = roundRepository.findById(currentRoundId)
@@ -330,16 +336,54 @@ public class RankingServiceImpl implements RankingService {
         }
         Round nextRound = nextRounds.get(0);
 
+        List<Ranking> sourceRankings = rankingRepository.findByRoundIdAndTeamIdInOrderByRankPositionAsc(currentRoundId, teamIds);
+        if (sourceRankings.isEmpty()) {
+            throw new RuntimeException("Không tìm thấy dữ liệu xếp hạng của các đội được chọn trong vòng hiện tại");
+        }
+
         rankingRepository.markTeamsAsPromoted(currentRoundId, teamIds);
 
-        List<Long> existingTeamIds = submissionRepository.findExistingSubmissionTeamIds(nextRound.getId(), teamIds);
+        List<Ranking> nextRoundSeedRankings = new ArrayList<>();
+        for (Ranking sourceRanking : sourceRankings) {
+            Long teamId = sourceRanking.getTeam().getId();
+            if (rankingRepository.existsByRoundIdAndTeamId(nextRound.getId(), teamId)) {
+                continue;
+            }
 
-        List<Long> teamsToCreate = teamIds.stream()
-                .filter(id -> !existingTeamIds.contains(id))
-                .collect(Collectors.toList());
+            Event eventRef = new Event();
+            eventRef.setId(nextRound.getEvent().getId());
 
-        for (Long teamId : teamsToCreate) {
-            submissionRepository.createPlaceholderSubmission(teamId, nextRound.getId());
+            Round roundRef = new Round();
+            roundRef.setId(nextRound.getId());
+
+            Team teamRef = new Team();
+            teamRef.setId(teamId);
+
+            Category categoryRef = null;
+            if (sourceRanking.getCategory() != null) {
+                categoryRef = new Category();
+                categoryRef.setId(sourceRanking.getCategory().getId());
+            }
+
+            User userRef = new User();
+            userRef.setId(userId);
+
+            Ranking seededRanking = new Ranking();
+            seededRanking.setEvent(eventRef);
+            seededRanking.setRound(roundRef);
+            seededRanking.setCategory(categoryRef);
+            seededRanking.setTeam(teamRef);
+            seededRanking.setTotalScore(BigDecimal.ZERO);
+            seededRanking.setRankPosition(sourceRanking.getRankPosition());
+            seededRanking.setIsPromoted(false);
+            seededRanking.setComputedBy(userRef);
+            seededRanking.setSnapshotNote("Seeded by manual promotion from round " + currentRoundId);
+
+            nextRoundSeedRankings.add(seededRanking);
+        }
+
+        if (!nextRoundSeedRankings.isEmpty()) {
+            rankingRepository.saveAll(nextRoundSeedRankings);
         }
 
         log.info("Đã thăng hạng thành công {} đội sang vòng {}", teamIds.size(), nextRound.getName());

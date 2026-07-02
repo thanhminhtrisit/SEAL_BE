@@ -21,5 +21,5 @@ public interface RankingService {
 
     List<ScoreBreakdownResponse> getScoreBreakdown(Long teamId, Long roundId);
 
-    void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds);
+    void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds, Long userId);
 }

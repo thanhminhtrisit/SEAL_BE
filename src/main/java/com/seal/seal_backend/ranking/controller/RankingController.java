@@ -2,14 +2,12 @@ package com.seal.seal_backend.ranking.controller;
 
 import com.seal.seal_backend.common.api.ApiResponse;
 import com.seal.seal_backend.common.security.CurrentUser;
-import com.seal.seal_backend.domain.repository.RoundRepository;
-import com.seal.seal_backend.domain.repository.SubmissionRepository;
+import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.ranking.dto.response.CategoryResponse;
 import com.seal.seal_backend.ranking.dto.response.DisqualifiedTeamResponse;
 import com.seal.seal_backend.ranking.dto.response.RankingResponse;
 import com.seal.seal_backend.ranking.dto.response.ScoreBreakdownResponse;
 import com.seal.seal_backend.ranking.service.RankingService;
-import com.seal.seal_backend.ranking.service.impl.RankingServiceImpl;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -27,8 +25,6 @@ import java.util.Map;
 public class RankingController {
 
     private final RankingService rankingService;
-    private final RoundRepository roundRepository;
-    private final SubmissionRepository submissionRepository;
 
 
     @GetMapping("/ping")
@@ -50,9 +46,9 @@ public class RankingController {
     public ResponseEntity<ApiResponse<List<RankingResponse>>> computeRanking(
             @PathVariable Long roundId,
             @RequestParam(required = false, defaultValue = "0") Long categoryId, // Thêm dòng này
-            @CurrentUser Long userId
+            @CurrentUser UserPrincipal user
     ) {
-        List<RankingResponse> rankings = rankingService.computeRankingForRound(roundId, categoryId, userId);
+        List<RankingResponse> rankings = rankingService.computeRankingForRound(roundId, categoryId, user.getId());
         return ResponseEntity.ok(ApiResponse.ok(rankings));
     }
 
@@ -69,10 +65,10 @@ public class RankingController {
     public ResponseEntity<ApiResponse<String>> disqualifyTeam(
             @PathVariable Long teamId,
             @RequestBody Map<String, String> requestBody,
-            @CurrentUser Long userId
+            @CurrentUser UserPrincipal user
     ) {
         String reason = requestBody.get("reason");
-        rankingService.disqualifyTeam(teamId, reason, userId);
+        rankingService.disqualifyTeam(teamId, reason, user.getId());
 
         return ResponseEntity.ok(ApiResponse.ok("Đã đình chỉ đội thi thành công"));
     }
@@ -90,11 +86,10 @@ public class RankingController {
     @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
     public ResponseEntity<ApiResponse<String>> promoteTeams(
             @PathVariable Long roundId,
-            @RequestBody List<Long> teamIds) {
+            @RequestBody List<Long> teamIds,
+            @CurrentUser UserPrincipal user) {
 
-        // Chỉ cần gọi service, nếu lỗi nó sẽ tự quăng RuntimeException
-        // Global Exception Handler của hệ thống sẽ tự lo phần trả về lỗi
-        rankingService.promoteTeamsToNextRound(roundId, teamIds);
+        rankingService.promoteTeamsToNextRound(roundId, teamIds, user.getId());
 
         return ResponseEntity.ok(ApiResponse.ok("Đã chuyển các đội vào vòng tiếp theo thành công!"));
     }
