@@ -9,11 +9,13 @@ import com.seal.seal_backend.domain.entity.*;
 import com.seal.seal_backend.domain.enums.AssignmentStatus;
 import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.domain.enums.EventType;
+import com.seal.seal_backend.domain.enums.ResourceType;
 import com.seal.seal_backend.domain.enums.TermType;
 import com.seal.seal_backend.domain.repository.*;
 import com.seal.seal_backend.domain.enums.RoundStatus;
 import com.seal.seal_backend.event.dto.request.*;
 import com.seal.seal_backend.event.dto.response.*;
+import com.seal.seal_backend.capacity.CapacityService;
 import com.seal.seal_backend.event.service.impl.EventServiceImpl;
 import com.seal.seal_backend.shared.contract.JudgeQueryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +49,8 @@ class EventServiceImplTest {
     @Mock JudgeAssignmentRepository judgeAssignmentRepository;
     @Mock EventBudgetRepository eventBudgetRepository;
     @Mock TeamRepository teamRepository;
+    @Mock CategoryResourceRepository categoryResourceRepository;
+    @Mock CapacityService capacityService;
     @Mock AuditPublisher auditPublisher;
     @Mock JudgeQueryPort judgeQueryPort;
 
@@ -143,7 +147,7 @@ class EventServiceImplTest {
             when(roundRepository.save(any(Round.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             RoundResponse response = service.addRound(1L, new CreateRoundRequest(
-                    "Presentation", 1, null, null, false,
+                    "Presentation", 1, null, null, null, false,
                     false, false, true, true));
 
             assertThat(response.requiresRepo()).isFalse();
@@ -165,7 +169,7 @@ class EventServiceImplTest {
             when(roundRepository.save(round)).thenReturn(round);
 
             RoundResponse response = service.updateRound(1L, 2L, new UpdateRoundRequest(
-                    null, null, null, null,
+                    null, null, null, null, null,
                     false, null, true, null));
 
             assertThat(response.requiresRepo()).isFalse();
@@ -179,8 +183,7 @@ class EventServiceImplTest {
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
             when(roundRepository.existsByEventIdAndOrderNumber(1L, 1)).thenReturn(true);
 
-            CreateRoundRequest req = new CreateRoundRequest(
-                    "Round 1", 1, null, null, false, true, false, false, false);
+            CreateRoundRequest req = new CreateRoundRequest("Round 1", 1, null, null, null, false, null, null, null, null);
 
             assertThatThrownBy(() -> service.addRound(1L, req))
                     .isInstanceOf(BusinessRuleException.class)
@@ -192,8 +195,7 @@ class EventServiceImplTest {
             when(eventRepository.findById(99L)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.addRound(99L,
-                    new CreateRoundRequest("R1", 1, null, null, false,
-                            true, false, false, false)))
+                    new CreateRoundRequest("R1", 1, null, null, null, false, null, null, null, null)))
                     .isInstanceOf(ResourceNotFoundException.class);
         }
     }
@@ -204,7 +206,7 @@ class EventServiceImplTest {
     class AddCriteriaSet {
 
         private CreateCriteriaSetRequest reqWith(BigDecimal w1, BigDecimal w2) {
-            return new CreateCriteriaSetRequest("Set A", null, null, List.of(
+            return new CreateCriteriaSetRequest("Set A", null, null, null, null, List.of(
                     new AddCriterionRequest("C1", null, new BigDecimal("10"), w1, 1),
                     new AddCriterionRequest("C2", null, new BigDecimal("10"), w2, 2)
             ));
@@ -232,6 +234,27 @@ class EventServiceImplTest {
                     new BigDecimal("60"), new BigDecimal("60")), 3L))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-03");
+        }
+
+        @Test
+        void categoryFromDifferentEvent_throws_BR_EVT_14() {
+            Event otherEvent = new Event();
+            otherEvent.setId(99L);
+            Category foreignCat = new Category();
+            foreignCat.setId(10L);
+            foreignCat.setEvent(otherEvent);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(userRepository.findById(3L)).thenReturn(Optional.of(sampleUser));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(foreignCat));
+
+            CreateCriteriaSetRequest req = new CreateCriteriaSetRequest(
+                    "X", null, null, 10L, null,
+                    List.of(new AddCriterionRequest("C1", null, new BigDecimal("10"), new BigDecimal("100"), 1)));
+
+            assertThatThrownBy(() -> service.addCriteriaSet(1L, req, 3L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-14");
         }
 
         @Test
@@ -556,7 +579,7 @@ class EventServiceImplTest {
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
 
             assertThatThrownBy(() -> service.update(1L,
-                    new UpdateEventRequest("New Name", null, null, null)))
+                    new UpdateEventRequest("New Name", null, null, null, null, null, null, null)))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
         }
@@ -567,8 +590,7 @@ class EventServiceImplTest {
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
 
             assertThatThrownBy(() -> service.addRound(1L,
-                    new CreateRoundRequest("R1", 1, null, null, false,
-                            true, false, false, false)))
+                    new CreateRoundRequest("R1", 1, null, null, null, false, null, null, null, null)))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
         }
@@ -764,6 +786,224 @@ class EventServiceImplTest {
             assertThatThrownBy(() -> service.deleteCategory(1L, 20L))
                     .isInstanceOf(BusinessRuleException.class)
                     .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-07");
+        }
+    }
+
+    // ─── Category Resources ───────────────────────────────────────────────────
+
+    @Nested
+    class CategoryResources {
+
+        private Category sampleCategory;
+
+        @org.junit.jupiter.api.BeforeEach
+        void setup() {
+            sampleCategory = new Category();
+            sampleCategory.setId(10L);
+            sampleCategory.setEvent(sampleEvent);
+            sampleCategory.setName("Web Application");
+            sampleCategory.setIsActive(true);
+        }
+
+        @Test
+        void addResource_validRequest_savesAndReturns() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(sampleCategory));
+
+            CategoryResource saved = new CategoryResource();
+            saved.setId(1L);
+            saved.setCategory(sampleCategory);
+            saved.setUrl("https://dataset.example.com/data.csv");
+            saved.setResourceType(ResourceType.DATASET);
+            when(categoryResourceRepository.save(any())).thenReturn(saved);
+
+            var req = new CreateCategoryResourceRequest(null, "https://dataset.example.com/data.csv", ResourceType.DATASET);
+            var resp = service.addCategoryResource(1L, 10L, req);
+
+            assertThat(resp.id()).isEqualTo(1L);
+            assertThat(resp.resourceType()).isEqualTo(ResourceType.DATASET);
+            verify(categoryResourceRepository).save(any());
+        }
+
+        @Test
+        void addResource_categoryWrongEvent_throws_BR_RES_01() {
+            Event otherEvent = new Event();
+            otherEvent.setId(99L);
+            Category foreignCat = new Category();
+            foreignCat.setId(10L);
+            foreignCat.setEvent(otherEvent);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(foreignCat));
+
+            assertThatThrownBy(() -> service.addCategoryResource(1L, 10L,
+                    new CreateCategoryResourceRequest(null, "https://x.com", ResourceType.LINK)))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-RES-01");
+        }
+
+        @Test
+        void listResources_returnsAll() {
+            CategoryResource r1 = new CategoryResource();
+            r1.setId(1L); r1.setCategory(sampleCategory);
+            r1.setUrl("https://a.com"); r1.setResourceType(ResourceType.DOC);
+            CategoryResource r2 = new CategoryResource();
+            r2.setId(2L); r2.setCategory(sampleCategory);
+            r2.setUrl("https://b.com"); r2.setResourceType(ResourceType.SAMPLE);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(sampleCategory));
+            when(categoryResourceRepository.findByCategoryIdOrderByCreatedAtAsc(10L))
+                    .thenReturn(List.of(r1, r2));
+
+            var result = service.listCategoryResources(1L, 10L);
+
+            assertThat(result).hasSize(2);
+            assertThat(result.get(0).resourceType()).isEqualTo(ResourceType.DOC);
+        }
+
+        @Test
+        void deleteResource_wrongCategory_throws_BR_RES_02() {
+            Category otherCat = new Category();
+            otherCat.setId(99L);
+            otherCat.setEvent(sampleEvent);
+
+            CategoryResource resource = new CategoryResource();
+            resource.setId(5L);
+            resource.setCategory(otherCat);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(sampleCategory));
+            when(categoryResourceRepository.findById(5L)).thenReturn(Optional.of(resource));
+
+            assertThatThrownBy(() -> service.deleteCategoryResource(1L, 10L, 5L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-RES-02");
+        }
+
+        @Test
+        void deleteResource_valid_callsDeleteById() {
+            CategoryResource resource = new CategoryResource();
+            resource.setId(5L);
+            resource.setCategory(sampleCategory);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(10L)).thenReturn(Optional.of(sampleCategory));
+            when(categoryResourceRepository.findById(5L)).thenReturn(Optional.of(resource));
+
+            service.deleteCategoryResource(1L, 10L, 5L);
+
+            verify(categoryResourceRepository).deleteById(5L);
+        }
+    }
+
+    // ─── Mentor Planning ──────────────────────────────────────────────────────
+
+    @Nested
+    class MentorPlanning {
+
+        @Test
+        void correctCalculation_withGap() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(10L);
+            when(capacityService.effectiveMaxTeamsPerMentor(sampleEvent)).thenReturn(5);
+            when(categoryRepository.countDistinctMentorsByEventId(1L)).thenReturn(1L);
+
+            MentorPlanningResponse resp = service.getMentorPlanning(1L);
+
+            assertThat(resp.activeTeams()).isEqualTo(10L);
+            assertThat(resp.maxTeamsPerMentor()).isEqualTo(5);
+            assertThat(resp.mentorsNeeded()).isEqualTo(2); // ceil(10/5)
+            assertThat(resp.currentMentors()).isEqualTo(1L);
+            assertThat(resp.gap()).isEqualTo(1); // 2 - 1
+        }
+
+        @Test
+        void noGap_whenEnoughMentors() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(8L);
+            when(capacityService.effectiveMaxTeamsPerMentor(sampleEvent)).thenReturn(5);
+            when(categoryRepository.countDistinctMentorsByEventId(1L)).thenReturn(2L);
+
+            MentorPlanningResponse resp = service.getMentorPlanning(1L);
+
+            assertThat(resp.mentorsNeeded()).isEqualTo(2); // ceil(8/5)=2
+            assertThat(resp.currentMentors()).isEqualTo(2L);
+            assertThat(resp.gap()).isEqualTo(0);
+        }
+
+        @Test
+        void gapIsNeverNegative_whenMoreMentorsThanNeeded() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(3L);
+            when(capacityService.effectiveMaxTeamsPerMentor(sampleEvent)).thenReturn(5);
+            when(categoryRepository.countDistinctMentorsByEventId(1L)).thenReturn(5L);
+
+            MentorPlanningResponse resp = service.getMentorPlanning(1L);
+
+            assertThat(resp.mentorsNeeded()).isEqualTo(1); // ceil(3/5)=1
+            assertThat(resp.currentMentors()).isEqualTo(5L);
+            assertThat(resp.gap()).isEqualTo(0); // max(0, 1-5)=0
+        }
+
+        @Test
+        void noActiveTeams_returnsZeroNeeded() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(0L);
+            when(capacityService.effectiveMaxTeamsPerMentor(sampleEvent)).thenReturn(5);
+            when(categoryRepository.countDistinctMentorsByEventId(1L)).thenReturn(0L);
+
+            MentorPlanningResponse resp = service.getMentorPlanning(1L);
+
+            assertThat(resp.mentorsNeeded()).isEqualTo(0);
+            assertThat(resp.gap()).isEqualTo(0);
+        }
+    }
+
+    // ─── listAll with status filter ───────────────────────────────────────────
+
+    @Nested
+    class ListAllEvents {
+
+        @Test
+        void noFilter_returnsAllEvents() {
+            Event e2 = new Event();
+            e2.setId(2L);
+            e2.setName("Open Event");
+            e2.setStatus(EventStatus.OPEN);
+            e2.setOwnerCoordinator(sampleUser);
+
+            when(eventRepository.findAllByOrderByCreatedAtDesc())
+                    .thenReturn(List.of(sampleEvent, e2));
+
+            var result = service.listAll(null);
+
+            assertThat(result).hasSize(2);
+        }
+
+        @Test
+        void filterApproved_returnsOnlyApprovedEvents() {
+            Event approved = new Event();
+            approved.setId(3L);
+            approved.setName("Approved Event");
+            approved.setStatus(EventStatus.APPROVED);
+            approved.setOwnerCoordinator(sampleUser);
+
+            when(eventRepository.findAllByStatusOrderByCreatedAtDesc(EventStatus.APPROVED))
+                    .thenReturn(List.of(approved));
+
+            var result = service.listAll(EventStatus.APPROVED);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).status()).isEqualTo(EventStatus.APPROVED);
+        }
+
+        @Test
+        void filterReturnsEmpty_whenNoMatch() {
+            when(eventRepository.findAllByStatusOrderByCreatedAtDesc(EventStatus.COMPLETED))
+                    .thenReturn(List.of());
+
+            assertThat(service.listAll(EventStatus.COMPLETED)).isEmpty();
         }
     }
 

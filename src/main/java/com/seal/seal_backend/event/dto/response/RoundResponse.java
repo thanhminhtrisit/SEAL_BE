@@ -10,6 +10,7 @@ public record RoundResponse(
         String name,
         Integer orderNumber,
         LocalDateTime submissionDeadline,
+        LocalDateTime scoringDeadline,
         RoundStatus status,
         Integer promotionTopN,
         boolean finalRound,
@@ -23,10 +24,12 @@ public record RoundResponse(
     public static RoundResponse from(Round r) {
         return new RoundResponse(
                 r.getId(), r.getEvent().getId(), r.getName(), r.getOrderNumber(),
-                r.getSubmissionDeadline(), r.getStatus(),
+                r.getSubmissionDeadline(), r.getScoringDeadline(), r.getStatus(),
                 r.getPromotionTopN(), r.getIsFinalRound(),
-                r.getRequiresRepo(), r.getRequiresDemo(),
-                r.getRequiresSlide(), r.getRequiresReport(),
+                Boolean.TRUE.equals(r.getRequiresRepo()),
+                Boolean.TRUE.equals(r.getRequiresDemo()),
+                Boolean.TRUE.equals(r.getRequiresSlide()),
+                Boolean.TRUE.equals(r.getRequiresReport()),
                 r.getCreatedAt(), r.getUpdatedAt()
         );
     }

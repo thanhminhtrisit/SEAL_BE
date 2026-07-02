@@ -10,6 +10,9 @@ public record CriteriaSetResponse(
         String description,
         Long eventId,
         Long roundId,
+        Long categoryId,
+        String categoryName,
+        Integer promotionTopN,
         boolean template,
         boolean defaultSet,
         List<CriterionResponse> criteria
@@ -19,6 +22,9 @@ public record CriteriaSetResponse(
                 cs.getId(), cs.getName(), cs.getDescription(),
                 cs.getEvent() != null ? cs.getEvent().getId() : null,
                 cs.getRound() != null ? cs.getRound().getId() : null,
+                cs.getCategory() != null ? cs.getCategory().getId() : null,
+                cs.getCategory() != null ? cs.getCategory().getName() : null,
+                cs.getPromotionTopN(),
                 cs.getIsTemplate(), cs.getIsDefault(),
                 criteria.stream().map(CriterionResponse::from).toList()
         );

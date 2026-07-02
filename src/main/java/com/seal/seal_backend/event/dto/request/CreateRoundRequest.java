@@ -10,6 +10,7 @@ public record CreateRoundRequest(
         @NotBlank @Size(max = 150) String name,
         @NotNull @Min(1) Integer orderNumber,
         LocalDateTime submissionDeadline,
+        LocalDateTime scoringDeadline,
         Integer promotionTopN,
         boolean finalRound,
         Boolean requiresRepo,

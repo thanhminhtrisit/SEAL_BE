@@ -2,7 +2,9 @@ package com.seal.seal_backend.event.controller;
 
 import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.common.api.ApiResponse;
+import com.seal.seal_backend.common.exception.BusinessRuleException;
 import com.seal.seal_backend.common.security.CurrentUser;
+import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.event.dto.request.*;
 import com.seal.seal_backend.event.dto.response.*;
 import com.seal.seal_backend.event.service.EventService;
@@ -43,9 +45,19 @@ public class EventController {
     }
 
     @GetMapping
-    @Operation(summary = "List all events")
-    public ApiResponse<List<EventSummaryResponse>> listAll() {
-        return ApiResponse.ok(eventService.listAll());
+    @Operation(summary = "List events; optional ?status= filter (DRAFT, APPROVED, OPEN, …)")
+    public ApiResponse<List<EventSummaryResponse>> listAll(
+            @RequestParam(required = false) String status) {
+        return ApiResponse.ok(eventService.listAll(resolveEventStatus(status)));
+    }
+
+    private EventStatus resolveEventStatus(String status) {
+        if (status == null) return null;
+        try {
+            return EventStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessRuleException("EVT-STATUS-INVALID", "Unknown event status: " + status);
+        }
     }
 
     @GetMapping("/{id}")
@@ -218,6 +230,39 @@ public class EventController {
         return ApiResponse.ok("Category deleted.", null);
     }
 
+    // ─── Category Resources ───────────────────────────────────────────────────
+
+    @PostMapping("/{eventId}/categories/{categoryId}/resources")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Add a resource link to a category")
+    public ResponseEntity<ApiResponse<CategoryResourceResponse>> addCategoryResource(
+            @PathVariable Long eventId,
+            @PathVariable Long categoryId,
+            @Valid @RequestBody CreateCategoryResourceRequest req) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(eventService.addCategoryResource(eventId, categoryId, req)));
+    }
+
+    @GetMapping("/{eventId}/categories/{categoryId}/resources")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "List resource links for a category")
+    public ApiResponse<List<CategoryResourceResponse>> listCategoryResources(
+            @PathVariable Long eventId,
+            @PathVariable Long categoryId) {
+        return ApiResponse.ok(eventService.listCategoryResources(eventId, categoryId));
+    }
+
+    @DeleteMapping("/{eventId}/categories/{categoryId}/resources/{resourceId}")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Delete a resource link from a category")
+    public ApiResponse<Void> deleteCategoryResource(
+            @PathVariable Long eventId,
+            @PathVariable Long categoryId,
+            @PathVariable Long resourceId) {
+        eventService.deleteCategoryResource(eventId, categoryId, resourceId);
+        return ApiResponse.ok("Resource deleted.", null);
+    }
+
     // ─── Submit (FR-EVT-07) ───────────────────────────────────────────────────
 
     @PostMapping("/{eventId}/submit")
@@ -296,6 +341,15 @@ public class EventController {
             @CurrentUser UserPrincipal user) {
         return ResponseEntity.ok(ApiResponse.ok("Event archived.",
                 eventService.archiveEvent(eventId, user.getId())));
+    }
+
+    // ─── Mentor Planning ──────────────────────────────────────────────────────
+
+    @GetMapping("/{eventId}/mentor-planning")
+    @PreAuthorize("hasAnyRole('COORDINATOR','SUPER_COORDINATOR')")
+    @Operation(summary = "Mentor capacity planning: active teams, mentors needed, current mentors, gap")
+    public ApiResponse<MentorPlanningResponse> getMentorPlanning(@PathVariable Long eventId) {
+        return ApiResponse.ok(eventService.getMentorPlanning(eventId));
     }
 
     // ─── Judge Assignment ─────────────────────────────────────────────────────

@@ -2,7 +2,9 @@ package com.seal.seal_backend.team.controller;
 
 import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.common.api.ApiResponse;
+import com.seal.seal_backend.common.exception.BusinessRuleException;
 import com.seal.seal_backend.common.security.CurrentUser;
+import com.seal.seal_backend.domain.enums.TeamStatus;
 import com.seal.seal_backend.team.dto.request.*;
 import com.seal.seal_backend.team.dto.response.*;
 import com.seal.seal_backend.team.service.TeamService;
@@ -50,9 +52,20 @@ public class TeamController {
     }
 
     @GetMapping("/by-event/{eventId}")
-    @Operation(summary = "List all teams for an event")
-    public ApiResponse<List<TeamSummaryResponse>> listByEvent(@PathVariable Long eventId) {
-        return ApiResponse.ok(teamService.listTeamsByEvent(eventId));
+    @Operation(summary = "List teams for an event; optional ?status= filter (REGISTERED, APPROVED, REJECTED, …)")
+    public ApiResponse<List<TeamSummaryResponse>> listByEvent(
+            @PathVariable Long eventId,
+            @RequestParam(required = false) String status) {
+        return ApiResponse.ok(teamService.listTeamsByEvent(eventId, resolveTeamStatus(status)));
+    }
+
+    private TeamStatus resolveTeamStatus(String status) {
+        if (status == null) return null;
+        try {
+            return TeamStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessRuleException("TEAM-STATUS-INVALID", "Unknown team status: " + status);
+        }
     }
 
     // ─── Invitation (FR-TEAM-03) ──────────────────────────────────────────────

@@ -1,5 +1,6 @@
 package com.seal.seal_backend.event.service;
 
+import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.event.dto.request.*;
 import com.seal.seal_backend.event.dto.response.*;
 import java.util.List;
@@ -9,7 +10,7 @@ public interface EventService {
     // --- Event ---
     EventResponse create(CreateEventRequest req, Long creatorId);
     EventResponse getById(Long id);
-    List<EventSummaryResponse> listAll();
+    List<EventSummaryResponse> listAll(EventStatus status);
     EventResponse update(Long id, UpdateEventRequest req);
 
     // --- Round ---
@@ -37,6 +38,11 @@ public interface EventService {
     CategoryResponse updateCategory(Long eventId, Long categoryId, UpdateCategoryRequest req);
     void deleteCategory(Long eventId, Long categoryId);
 
+    // --- Category Resources ---
+    CategoryResourceResponse addCategoryResource(Long eventId, Long categoryId, CreateCategoryResourceRequest req);
+    List<CategoryResourceResponse> listCategoryResources(Long eventId, Long categoryId);
+    void deleteCategoryResource(Long eventId, Long categoryId, Long resourceId);
+
     // --- Judge Assignment ---
     JudgeAssignmentResponse assignJudge(Long eventId, Long roundId, AssignJudgeRequest req, Long assignedById);
     void revokeJudge(Long eventId, Long roundId, Long assignmentId);
@@ -54,4 +60,7 @@ public interface EventService {
     EventResponse startEvent(Long eventId, Long coordinatorId);
     EventResponse completeEvent(Long eventId, Long coordinatorId);
     EventResponse archiveEvent(Long eventId, Long coordinatorId);
+
+    // --- Mentor Planning ---
+    MentorPlanningResponse getMentorPlanning(Long eventId);
 }

@@ -10,5 +10,6 @@ import java.util.List;
 public interface EventRepository extends JpaRepository<Event, Long> {
     boolean existsBySlug(String slug);
     List<Event> findAllByOrderByCreatedAtDesc();
+    List<Event> findAllByStatusOrderByCreatedAtDesc(EventStatus status);
     long countByTermPlanIdAndStatusNot(Long termPlanId, EventStatus status);
 }

@@ -1,5 +1,6 @@
 package com.seal.seal_backend.event.service.impl;
 
+import com.seal.seal_backend.capacity.CapacityService;
 import com.seal.seal_backend.common.audit.AuditAction;
 import com.seal.seal_backend.common.audit.AuditPublisher;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
@@ -39,6 +40,8 @@ public class EventServiceImpl implements EventService {
     private final JudgeAssignmentRepository judgeAssignmentRepository;
     private final EventBudgetRepository eventBudgetRepository;
     private final TeamRepository teamRepository;
+    private final CategoryResourceRepository categoryResourceRepository;
+    private final CapacityService capacityService;
     private final AuditPublisher auditPublisher;
     private final JudgeQueryPort judgeQueryPort;
 
@@ -101,9 +104,11 @@ public class EventServiceImpl implements EventService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<EventSummaryResponse> listAll() {
-        return eventRepository.findAllByOrderByCreatedAtDesc()
-                .stream().map(EventSummaryResponse::from).toList();
+    public List<EventSummaryResponse> listAll(EventStatus status) {
+        List<Event> events = status == null
+                ? eventRepository.findAllByOrderByCreatedAtDesc()
+                : eventRepository.findAllByStatusOrderByCreatedAtDesc(status);
+        return events.stream().map(EventSummaryResponse::from).toList();
     }
 
     @Override
@@ -116,6 +121,10 @@ public class EventServiceImpl implements EventService {
         if (req.description() != null) event.setDescription(req.description());
         if (req.registrationStart() != null) event.setRegistrationStart(req.registrationStart());
         if (req.registrationEnd() != null) event.setRegistrationEnd(req.registrationEnd());
+        if (req.maxTeamSize() != null) event.setMaxTeamSize(req.maxTeamSize());
+        if (req.maxTeams() != null) event.setMaxTeams(req.maxTeams());
+        if (req.maxParticipants() != null) event.setMaxParticipants(req.maxParticipants());
+        if (req.maxTeamsPerMentor() != null) event.setMaxTeamsPerMentor(req.maxTeamsPerMentor());
 
         if (event.getRegistrationStart() != null && event.getRegistrationEnd() != null
                 && !event.getRegistrationStart().isBefore(event.getRegistrationEnd())) {
@@ -217,6 +226,7 @@ public class EventServiceImpl implements EventService {
         round.setName(req.name());
         round.setOrderNumber(req.orderNumber());
         round.setSubmissionDeadline(req.submissionDeadline());
+        round.setScoringDeadline(req.scoringDeadline());
         round.setPromotionTopN(req.promotionTopN());
         round.setIsFinalRound(req.finalRound());
         round.setRequiresRepo(req.requiresRepo() != null ? req.requiresRepo() : true);
@@ -224,6 +234,10 @@ public class EventServiceImpl implements EventService {
         round.setRequiresSlide(Boolean.TRUE.equals(req.requiresSlide()));
         round.setRequiresReport(Boolean.TRUE.equals(req.requiresReport()));
         round.setStatus(RoundStatus.DRAFT);
+        if (req.requiresRepo() != null) round.setRequiresRepo(req.requiresRepo());
+        if (req.requiresDemo() != null) round.setRequiresDemo(req.requiresDemo());
+        if (req.requiresSlide() != null) round.setRequiresSlide(req.requiresSlide());
+        if (req.requiresReport() != null) round.setRequiresReport(req.requiresReport());
 
         return RoundResponse.from(roundRepository.save(round));
     }
@@ -253,6 +267,7 @@ public class EventServiceImpl implements EventService {
 
         if (req.name() != null && !req.name().isBlank()) round.setName(req.name());
         if (req.submissionDeadline() != null) round.setSubmissionDeadline(req.submissionDeadline());
+        if (req.scoringDeadline() != null) round.setScoringDeadline(req.scoringDeadline());
         if (req.promotionTopN() != null) round.setPromotionTopN(req.promotionTopN());
         if (req.finalRound() != null) round.setIsFinalRound(req.finalRound());
         if (req.requiresRepo() != null) round.setRequiresRepo(req.requiresRepo());
@@ -287,11 +302,24 @@ public class EventServiceImpl implements EventService {
             round = findRound(req.roundId(), eventId);
         }
 
+        Category category = null;
+        if (req.categoryId() != null) {
+            category = categoryRepository.findById(req.categoryId())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Category not found: " + req.categoryId()));
+            if (!category.getEvent().getId().equals(eventId)) {
+                throw new BusinessRuleException("BR-EVT-14",
+                        "Category " + req.categoryId() + " does not belong to event " + eventId);
+            }
+        }
+
         CriteriaSet cs = new CriteriaSet();
         cs.setName(req.name());
         cs.setDescription(req.description());
         cs.setEvent(event);
         cs.setRound(round);
+        cs.setCategory(category);
+        cs.setPromotionTopN(req.promotionTopN());
         cs.setIsTemplate(false);
         cs.setIsDefault(false);
         cs.setCreatedBy(creator);
@@ -524,6 +552,62 @@ public class EventServiceImpl implements EventService {
         categoryRepository.deleteById(categoryId);
     }
 
+    // ─── Category Resources ───────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public CategoryResourceResponse addCategoryResource(Long eventId, Long categoryId,
+                                                        CreateCategoryResourceRequest req) {
+        findEvent(eventId);
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
+        if (!category.getEvent().getId().equals(eventId)) {
+            throw new BusinessRuleException("BR-RES-01",
+                    "Category " + categoryId + " does not belong to event " + eventId);
+        }
+
+        CategoryResource resource = new CategoryResource();
+        resource.setCategory(category);
+        resource.setLabel(req.label());
+        resource.setUrl(req.url());
+        resource.setResourceType(req.resourceType());
+
+        return CategoryResourceResponse.from(categoryResourceRepository.save(resource));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CategoryResourceResponse> listCategoryResources(Long eventId, Long categoryId) {
+        findEvent(eventId);
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
+        if (!category.getEvent().getId().equals(eventId)) {
+            throw new BusinessRuleException("BR-RES-01",
+                    "Category " + categoryId + " does not belong to event " + eventId);
+        }
+        return categoryResourceRepository.findByCategoryIdOrderByCreatedAtAsc(categoryId)
+                .stream().map(CategoryResourceResponse::from).toList();
+    }
+
+    @Override
+    @Transactional
+    public void deleteCategoryResource(Long eventId, Long categoryId, Long resourceId) {
+        findEvent(eventId);
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found: " + categoryId));
+        if (!category.getEvent().getId().equals(eventId)) {
+            throw new BusinessRuleException("BR-RES-01",
+                    "Category " + categoryId + " does not belong to event " + eventId);
+        }
+        CategoryResource resource = categoryResourceRepository.findById(resourceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Resource not found: " + resourceId));
+        if (!resource.getCategory().getId().equals(categoryId)) {
+            throw new BusinessRuleException("BR-RES-02",
+                    "Resource " + resourceId + " does not belong to category " + categoryId);
+        }
+        categoryResourceRepository.deleteById(resourceId);
+    }
+
     // ─── Judge Assignment ─────────────────────────────────────────────────────
 
     @Override
@@ -739,6 +823,22 @@ public class EventServiceImpl implements EventService {
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    // ─── Mentor Planning ──────────────────────────────────────────────────────
+
+    @Override
+    @Transactional(readOnly = true)
+    public MentorPlanningResponse getMentorPlanning(Long eventId) {
+        Event event = findEvent(eventId);
+        long activeTeams = teamRepository.countActiveTeamsByEventId(eventId);
+        int maxTeamsPerMentor = capacityService.effectiveMaxTeamsPerMentor(event);
+        int mentorsNeeded = maxTeamsPerMentor == 0 ? 0
+                : (int) Math.ceil((double) activeTeams / maxTeamsPerMentor);
+        long currentMentors = categoryRepository.countDistinctMentorsByEventId(eventId);
+        int gap = (int) Math.max(0L, mentorsNeeded - currentMentors);
+        return new MentorPlanningResponse(eventId, activeTeams, maxTeamsPerMentor,
+                mentorsNeeded, currentMentors, gap);
+    }
 
     private void validateNotPending(Event event) {
         if (event.getStatus() == EventStatus.PENDING_APPROVAL) {

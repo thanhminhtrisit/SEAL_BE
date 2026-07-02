@@ -1,5 +1,6 @@
 package com.seal.seal_backend.team;
 
+import com.seal.seal_backend.capacity.CapacityService;
 import com.seal.seal_backend.common.audit.AuditPublisher;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
 import com.seal.seal_backend.common.exception.ForbiddenActionException;
@@ -35,6 +36,7 @@ class TeamServiceImplTest {
     @Mock EventRepository eventRepository;
     @Mock CategoryRepository categoryRepository;
     @Mock UserRepository userRepository;
+    @Mock CapacityService capacityService;
     @Mock AuditPublisher auditPublisher;
 
     @InjectMocks TeamServiceImpl service;
@@ -165,6 +167,10 @@ class TeamServiceImplTest {
             when(userRepository.findById(7L)).thenReturn(Optional.of(sampleLeader));
             when(teamRepository.existsActiveMemberByUserIdAndEventId(7L, 1L)).thenReturn(false);
             when(teamRepository.existsByEventIdAndName(1L, "Code Seals")).thenReturn(false);
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(0L);
+            when(capacityService.effectiveMaxTeams(sampleEvent)).thenReturn(50);
+            when(teamMemberRepository.countDistinctParticipantsByEventId(1L)).thenReturn(0L);
+            when(capacityService.effectiveMaxParticipants(sampleEvent)).thenReturn(300);
             when(teamRepository.save(any())).thenReturn(sampleTeam);
             when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
 
@@ -267,7 +273,10 @@ class TeamServiceImplTest {
             when(teamInvitationRepository.findById(10L)).thenReturn(Optional.of(pendingInvitation));
             when(userRepository.findById(8L)).thenReturn(Optional.of(invitee));
             when(teamRepository.existsActiveMemberByUserIdAndEventId(8L, 1L)).thenReturn(false);
-            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(1L); // just leader
+            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(1L);
+            when(capacityService.effectiveMaxTeamSize(sampleEvent)).thenReturn(5);
+            when(teamMemberRepository.countDistinctParticipantsByEventId(1L)).thenReturn(1L);
+            when(capacityService.effectiveMaxParticipants(sampleEvent)).thenReturn(300);
             when(teamMemberRepository.save(any(TeamMember.class))).thenAnswer(inv -> inv.getArgument(0));
             when(teamInvitationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
             when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
@@ -294,15 +303,16 @@ class TeamServiceImplTest {
         }
 
         @Test
-        void acceptWhenTeamFull_throws_BR_TEAM_01() {
+        void acceptWhenTeamFull_throws_BR_CAP_03() {
             when(teamInvitationRepository.findById(10L)).thenReturn(Optional.of(pendingInvitation));
             when(userRepository.findById(8L)).thenReturn(Optional.of(invitee));
             when(teamRepository.existsActiveMemberByUserIdAndEventId(8L, 1L)).thenReturn(false);
-            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(5L); // already at max
+            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(5L);
+            when(capacityService.effectiveMaxTeamSize(sampleEvent)).thenReturn(5);
 
             assertThatThrownBy(() -> service.acceptInvitation(10L, 8L))
                     .isInstanceOf(BusinessRuleException.class)
-                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-01");
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-CAP-03");
         }
 
         @Test
@@ -369,15 +379,16 @@ class TeamServiceImplTest {
     class ReviewTeam {
 
         @Test
-        void approveWithTooFewMembers_throws_BR_TEAM_01() {
+        void approveWithTooFewMembers_throws_BR_CAP_04() {
             when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
             when(userRepository.findById(3L)).thenReturn(Optional.of(sampleLeader));
-            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(2L); // < 3
+            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(2L);
+            when(capacityService.effectiveMinTeamSize(sampleEvent)).thenReturn(3);
 
             assertThatThrownBy(() -> service.reviewTeam(1L,
                     new ApproveTeamRequest(true, null), 3L, "127.0.0.1"))
                     .isInstanceOf(BusinessRuleException.class)
-                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-01");
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-CAP-04");
         }
 
         @Test
@@ -397,7 +408,9 @@ class TeamServiceImplTest {
 
             when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
             when(userRepository.findById(3L)).thenReturn(Optional.of(coordinator));
-            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(3L); // exactly min
+            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(3L);
+            when(capacityService.effectiveMinTeamSize(sampleEvent)).thenReturn(3);
+            when(capacityService.effectiveMaxTeamSize(sampleEvent)).thenReturn(5);
             when(teamRepository.save(any())).thenReturn(approvedTeam);
             when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
 
@@ -503,6 +516,151 @@ class TeamServiceImplTest {
                     .thenReturn(List.of());
 
             assertThat(service.listMyInvitations("nobody@test.local")).isEmpty();
+        }
+    }
+
+    // ─── listTeamsByEvent with status filter ──────────────────────────────────
+
+    @Nested
+    class ListTeamsByEvent {
+
+        @Test
+        void noFilter_returnsAllTeams() {
+            Team t2 = new Team();
+            t2.setId(2L);
+            t2.setEvent(sampleEvent);
+            t2.setCategory(sampleCategory);
+            t2.setLeader(sampleLeader);
+            t2.setName("Seal Beta");
+            t2.setStatus(TeamStatus.APPROVED);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.findByEventIdOrderByCreatedAtAsc(1L))
+                    .thenReturn(List.of(sampleTeam, t2));
+
+            var result = service.listTeamsByEvent(1L, null);
+
+            assertThat(result).hasSize(2);
+        }
+
+        @Test
+        void filterApproved_returnsOnlyApprovedTeams() {
+            Team approved = new Team();
+            approved.setId(2L);
+            approved.setEvent(sampleEvent);
+            approved.setCategory(sampleCategory);
+            approved.setLeader(sampleLeader);
+            approved.setName("Seal Approved");
+            approved.setStatus(TeamStatus.APPROVED);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(teamRepository.findByEventIdAndStatusOrderByCreatedAtAsc(1L, TeamStatus.APPROVED))
+                    .thenReturn(List.of(approved));
+
+            var result = service.listTeamsByEvent(1L, TeamStatus.APPROVED);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).status()).isEqualTo(TeamStatus.APPROVED);
+        }
+
+        @Test
+        void eventNotFound_throws_ResourceNotFound() {
+            when(eventRepository.findById(99L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.listTeamsByEvent(99L, null))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
+    }
+
+    // ─── Capacity Rules ───────────────────────────────────────────────────────
+
+    @Nested
+    class CapacityRules {
+
+        @Test
+        void createTeam_whenMaxTeamsReached_throws_BR_CAP_01() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(1L)).thenReturn(Optional.of(sampleCategory));
+            when(userRepository.findById(7L)).thenReturn(Optional.of(sampleLeader));
+            when(teamRepository.existsActiveMemberByUserIdAndEventId(7L, 1L)).thenReturn(false);
+            when(teamRepository.existsByEventIdAndName(1L, "Team X")).thenReturn(false);
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(50L);
+            when(capacityService.effectiveMaxTeams(sampleEvent)).thenReturn(50);
+
+            assertThatThrownBy(() -> service.createTeam(
+                    new CreateTeamRequest("Team X", null, 1L, 1L), 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-CAP-01");
+        }
+
+        @Test
+        void createTeam_whenMaxParticipantsReached_throws_BR_CAP_02() {
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(categoryRepository.findById(1L)).thenReturn(Optional.of(sampleCategory));
+            when(userRepository.findById(7L)).thenReturn(Optional.of(sampleLeader));
+            when(teamRepository.existsActiveMemberByUserIdAndEventId(7L, 1L)).thenReturn(false);
+            when(teamRepository.existsByEventIdAndName(1L, "Team X")).thenReturn(false);
+            when(teamRepository.countActiveTeamsByEventId(1L)).thenReturn(5L);
+            when(capacityService.effectiveMaxTeams(sampleEvent)).thenReturn(50);
+            when(teamMemberRepository.countDistinctParticipantsByEventId(1L)).thenReturn(300L);
+            when(capacityService.effectiveMaxParticipants(sampleEvent)).thenReturn(300);
+
+            assertThatThrownBy(() -> service.createTeam(
+                    new CreateTeamRequest("Team X", null, 1L, 1L), 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-CAP-02");
+        }
+
+        @Test
+        void acceptInvitation_whenEventAtParticipantCapacity_throws_BR_CAP_02() {
+            User invitee = new User();
+            invitee.setId(8L);
+            invitee.setEmail("member@student.local");
+
+            TeamInvitation inv = new TeamInvitation();
+            inv.setId(10L);
+            inv.setTeam(sampleTeam);
+            inv.setEmail("member@student.local");
+            inv.setStatus(InvitationStatus.PENDING);
+            inv.setExpiresAt(LocalDateTime.now().plusDays(7));
+
+            when(teamInvitationRepository.findById(10L)).thenReturn(Optional.of(inv));
+            when(userRepository.findById(8L)).thenReturn(Optional.of(invitee));
+            when(teamRepository.existsActiveMemberByUserIdAndEventId(8L, 1L)).thenReturn(false);
+            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(1L);
+            when(capacityService.effectiveMaxTeamSize(sampleEvent)).thenReturn(5);
+            when(teamMemberRepository.countDistinctParticipantsByEventId(1L)).thenReturn(300L);
+            when(capacityService.effectiveMaxParticipants(sampleEvent)).thenReturn(300);
+
+            assertThatThrownBy(() -> service.acceptInvitation(10L, 8L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-CAP-02");
+        }
+
+        @Test
+        void reviewTeam_approve_withMinSizeFromCapacity_passes() {
+            sampleEvent.setMaxTeamSize(10); // override: larger max
+            User coordinator = new User();
+            coordinator.setId(3L);
+
+            Team approvedTeam = new Team();
+            approvedTeam.setId(1L);
+            approvedTeam.setEvent(sampleEvent);
+            approvedTeam.setCategory(sampleCategory);
+            approvedTeam.setLeader(sampleLeader);
+            approvedTeam.setName("Code Seals");
+            approvedTeam.setStatus(TeamStatus.APPROVED);
+
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(userRepository.findById(3L)).thenReturn(Optional.of(coordinator));
+            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(4L);
+            when(capacityService.effectiveMinTeamSize(sampleEvent)).thenReturn(3);
+            when(capacityService.effectiveMaxTeamSize(sampleEvent)).thenReturn(10);
+            when(teamRepository.save(any())).thenReturn(approvedTeam);
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+
+            assertThatNoException().isThrownBy(() ->
+                    service.reviewTeam(1L, new ApproveTeamRequest(true, null), 3L, "127.0.0.1"));
         }
     }
 

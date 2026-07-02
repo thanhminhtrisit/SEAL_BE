@@ -7,5 +7,9 @@ public record UpdateEventRequest(
         @Size(max = 200) String name,
         String description,
         LocalDateTime registrationStart,
-        LocalDateTime registrationEnd
+        LocalDateTime registrationEnd,
+        Integer maxTeamSize,
+        Integer maxTeams,
+        Integer maxParticipants,
+        Integer maxTeamsPerMentor
 ) {}
