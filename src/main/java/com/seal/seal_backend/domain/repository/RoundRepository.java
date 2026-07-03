@@ -1,10 +1,13 @@
 package com.seal.seal_backend.domain.repository;
 
 import com.seal.seal_backend.domain.entity.Round;
+import com.seal.seal_backend.domain.enums.RoundStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
 import java.util.List;
 
 import java.util.List;
@@ -26,4 +29,8 @@ public interface RoundRepository extends JpaRepository<Round, Long> {
     List<Round> findByEventIdOrderByOrderNumberAsc(Long eventId);
 
     Optional<Round> findByEventIdAndOrderNumber(Long eventId, Integer orderNumber);
+
+    List<Round> findByStatusAndScoringDeadlineBefore(RoundStatus status, LocalDateTime now);
+
+    List<Round> findByStatusAndScoringDeadlineBeforeOrderByOrderNumberAsc(RoundStatus status, LocalDateTime now);
 }

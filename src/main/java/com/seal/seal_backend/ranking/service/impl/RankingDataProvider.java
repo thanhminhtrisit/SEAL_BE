@@ -17,11 +17,22 @@ public class RankingDataProvider {
     public record ScoreView(Long teamId, Long criterionId, Double scoreValue) {}
 
     public List<TeamView> getTeamsInRound(Long roundId) {
-        String sql = "SELECT t.id, t.name, t.status, t.category_id, c.name AS category_name, MAX(s.created_at) AS submission_time " +
-                "FROM teams t " +
-                "JOIN submissions s ON s.team_id = t.id " +
-                "LEFT JOIN categories c ON t.category_id = c.id " +
-            "WHERE s.round_id = ? " +
+        String sql = "SELECT t.id, t.name, t.status, t.category_id, c.name AS category_name, " +
+            "COALESCE( " +
+            "    MAX(CASE WHEN src.source = 'SUBMISSION' THEN src.activity_time END), " +
+            "    MAX(CASE WHEN src.source = 'RANKING' THEN src.activity_time END) " +
+            ") AS submission_time " +
+            "FROM ( " +
+            "    SELECT s.team_id, s.created_at AS activity_time, 'SUBMISSION' AS source " +
+            "    FROM submissions s " +
+            "    WHERE s.round_id = ? " +
+            "    UNION ALL " +
+            "    SELECT r.team_id, r.computed_at AS activity_time, 'RANKING' AS source " +
+            "    FROM rankings r " +
+            "    WHERE r.round_id = ? " +
+            ") src " +
+            "JOIN teams t ON t.id = src.team_id " +
+            "LEFT JOIN categories c ON t.category_id = c.id " +
             "GROUP BY t.id, t.name, t.status, t.category_id, c.name";
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> new TeamView(
@@ -31,7 +42,7 @@ public class RankingDataProvider {
                 rs.getObject("category_id", Long.class),
                 rs.getString("category_name"),
                 rs.getObject("submission_time", LocalDateTime.class) // Lấy thời gian nộp bài
-        ), roundId);
+        ), roundId, roundId);
     }
 
     // Các hàm getCriteriaForRound và getScoresForRound giữ nguyên như cũ của bạn

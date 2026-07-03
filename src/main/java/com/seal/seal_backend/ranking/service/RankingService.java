@@ -21,5 +21,9 @@ public interface RankingService {
 
     List<ScoreBreakdownResponse> getScoreBreakdown(Long teamId, Long roundId);
 
+    // Hàm tự động của hệ thống
+    void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds);
+
+    // Hàm thủ công cho Coordinator/Admin
     void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds, Long userId);
 }

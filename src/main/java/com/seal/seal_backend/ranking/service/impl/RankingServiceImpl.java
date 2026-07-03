@@ -317,6 +317,13 @@ public class RankingServiceImpl implements RankingService {
         return jdbcTemplate.query(sql, new DataClassRowMapper<>(CategoryResponse.class), eventId);
     }
 
+    // Hàm khởi tạo tự động của hệ thống
+    @Override
+    @Transactional
+    public void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds) {
+        promoteTeamsToNextRound(currentRoundId, teamIds, null);
+    }
+
     @Override
     @Transactional
     public void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds, Long userId) {
@@ -324,7 +331,9 @@ public class RankingServiceImpl implements RankingService {
             return;
         }
         if (userId == null) {
-            throw new RuntimeException("Không xác định được người thực hiện thao tác thăng hạng");
+            log.info("Hệ thống đang tự động thăng hạng cho {} đội...", teamIds.size());
+        } else {
+            log.info("Người dùng ID [{}] đang thao tác thủ công thăng hạng cho {} đội...", userId, teamIds.size());
         }
 
         Round current = roundRepository.findById(currentRoundId)
@@ -365,8 +374,11 @@ public class RankingServiceImpl implements RankingService {
                 categoryRef.setId(sourceRanking.getCategory().getId());
             }
 
-            User userRef = new User();
-            userRef.setId(userId);
+            User userRef = null;
+            if (userId != null) {
+                userRef = new User();
+                userRef.setId(userId);
+            }
 
             Ranking seededRanking = new Ranking();
             seededRanking.setEvent(eventRef);
@@ -377,7 +389,7 @@ public class RankingServiceImpl implements RankingService {
             seededRanking.setRankPosition(sourceRanking.getRankPosition());
             seededRanking.setIsPromoted(false);
             seededRanking.setComputedBy(userRef);
-            seededRanking.setSnapshotNote("Seeded by manual promotion from round " + currentRoundId);
+            seededRanking.setSnapshotNote("Seeded by promotion from round " + currentRoundId);
 
             nextRoundSeedRankings.add(seededRanking);
         }
