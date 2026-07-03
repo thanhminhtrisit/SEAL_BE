@@ -204,7 +204,7 @@ public class EvaluationServiceImpl implements EvaluationService {
 
         validateEvaluationOwner(evaluation, currentUserId);
         resolveActiveJudgeAssignment(evaluation.getJudge().getId(), evaluation.getSubmission());
-        validateEvaluationIsDraft(evaluation);
+        validateEvaluationIsEditable(evaluation);
 
         String originalGeneralComment = evaluation.getGeneralComment();
         boolean evaluationCommentChanged = request.getGeneralComment() != null
@@ -290,10 +290,13 @@ public class EvaluationServiceImpl implements EvaluationService {
     @Transactional
     public EvaluationResponse submitEvaluation(Long currentUserId, Long evaluationId, SubmitEvaluationRequest request) {
         Evaluation evaluation = getEvaluationOrThrow(evaluationId);
+        EvaluationStatus oldStatus = evaluation.getStatus();
+        LocalDateTime oldSubmittedAt = evaluation.getSubmittedAt();
+        LocalDateTime oldLockedAt = evaluation.getLockedAt();
 
         validateEvaluationOwner(evaluation, currentUserId);
         resolveActiveJudgeAssignment(evaluation.getJudge().getId(), evaluation.getSubmission());
-        validateEvaluationIsDraft(evaluation);
+        validateEvaluationIsEditable(evaluation);
 
         if (request.getGeneralComment() != null) {
             evaluation.setGeneralComment(request.getGeneralComment());
@@ -302,17 +305,17 @@ public class EvaluationServiceImpl implements EvaluationService {
         validateAllCriteriaScored(evaluation);
 
         evaluation.setStatus(EvaluationStatus.SUBMITTED);
-        evaluation.setSubmittedAt(LocalDateTime.now());
-        evaluation.setLockedAt(LocalDateTime.now());
+        if (evaluation.getSubmittedAt() == null) {
+            evaluation.setSubmittedAt(LocalDateTime.now());
+        }
 
         Evaluation savedEvaluation = evaluationRepository.save(evaluation);
-        EvaluationStatus oldStatus = EvaluationStatus.DRAFT;
         auditPublisher.log(
                 evaluation.getJudge(),
                 AuditAction.EVALUATION_SUBMITTED,
                 "EVALUATION",
                 savedEvaluation.getId(),
-                buildEvaluationStatusJson(savedEvaluation.getId(), oldStatus, null, null),
+                buildEvaluationStatusJson(savedEvaluation.getId(), oldStatus, oldSubmittedAt, oldLockedAt),
                 buildEvaluationStatusJson(savedEvaluation.getId(), savedEvaluation.getStatus(), savedEvaluation.getSubmittedAt(), savedEvaluation.getLockedAt()),
                 null,
                 null
@@ -378,9 +381,9 @@ public class EvaluationServiceImpl implements EvaluationService {
         return scoringCriterionRepository.findByCriteriaSet_Round_IdAndIsActiveTrueOrderByDisplayOrderAsc(roundId);
     }
 
-    private void validateEvaluationIsDraft(Evaluation evaluation) {
-        if (evaluation.getStatus() != EvaluationStatus.DRAFT) {
-            throw new BusinessException("Only draft evaluation can be modified");
+    private void validateEvaluationIsEditable(Evaluation evaluation) {
+        if (evaluation.getStatus() == EvaluationStatus.LOCKED || evaluation.getLockedAt() != null) {
+            throw new BusinessException("Locked evaluation cannot be modified");
         }
     }
 

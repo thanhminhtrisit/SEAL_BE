@@ -36,6 +36,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -214,10 +215,42 @@ class EvaluationServiceImplTest {
     }
 
     @Test
-    void judgeCannotEditAfterSubmit() {
+    void judgeCanEditAfterSubmitWhenNotLocked() {
         User judge = user(4L);
         Submission submission = submittedSubmission(9L, 1L, 10L);
         Evaluation evaluation = evaluation(1L, judge, submission, EvaluationStatus.SUBMITTED);
+        ScoringCriterion criterion = criterion(1L, "Code", 10L, 1);
+        when(evaluationRepository.findById(1L)).thenReturn(Optional.of(evaluation));
+        when(judgeAssignmentRepository.findByJudgeIdAndRoundIdAndStatus(4L, 1L, AssignmentStatus.ACTIVE))
+                .thenReturn(List.of(activeAssignment(11L, 4L, 1L, 10L)));
+        when(scoringCriterionRepository.findByCriteriaSet_Round_IdAndIsActiveTrueOrderByDisplayOrderAsc(1L))
+                .thenReturn(List.of(criterion));
+        when(scoreRepository.findByEvaluation_IdAndCriterion_Id(1L, 1L)).thenReturn(Optional.empty());
+        when(scoreRepository.save(any(Score.class))).thenAnswer(invocation -> saveScore(invocation.getArgument(0), 200L));
+        when(scoreRepository.findByEvaluation_IdOrderByCriterion_DisplayOrderAsc(1L)).thenReturn(List.of());
+
+        SaveScoresRequest request = new SaveScoresRequest();
+        request.setScores(List.of(scoreItem(1L, BigDecimal.ONE, "ok")));
+
+        service.saveDraftScores(4L, 1L, request);
+
+        verify(auditPublisher).log(
+                org.mockito.ArgumentMatchers.eq(judge),
+                org.mockito.ArgumentMatchers.eq(AuditAction.SCORE_CREATED),
+                org.mockito.ArgumentMatchers.eq("SCORE"),
+                org.mockito.ArgumentMatchers.eq(200L),
+                any(),
+                any(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull()
+        );
+    }
+
+    @Test
+    void judgeCannotEditLockedEvaluation() {
+        User judge = user(4L);
+        Submission submission = submittedSubmission(9L, 1L, 10L);
+        Evaluation evaluation = evaluation(1L, judge, submission, EvaluationStatus.LOCKED);
         when(evaluationRepository.findById(1L)).thenReturn(Optional.of(evaluation));
         when(judgeAssignmentRepository.findByJudgeIdAndRoundIdAndStatus(4L, 1L, AssignmentStatus.ACTIVE))
                 .thenReturn(List.of(activeAssignment(11L, 4L, 1L, 10L)));
@@ -227,7 +260,7 @@ class EvaluationServiceImplTest {
 
         assertThatThrownBy(() -> service.saveDraftScores(4L, 1L, request))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("draft evaluation");
+                .hasMessageContaining("Locked evaluation");
     }
 
     @Test
@@ -391,7 +424,11 @@ class EvaluationServiceImplTest {
                 .thenReturn(List.of(score));
         when(evaluationRepository.save(any(Evaluation.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.submitEvaluation(4L, 1L, new SubmitEvaluationRequest());
+        var response = service.submitEvaluation(4L, 1L, new SubmitEvaluationRequest());
+
+        assertThat(response.getStatus()).isEqualTo(EvaluationStatus.SUBMITTED);
+        assertThat(response.getSubmittedAt()).isNotNull();
+        assertThat(response.getLockedAt()).isNull();
 
         verify(auditPublisher).log(
                 org.mockito.ArgumentMatchers.eq(judge),
@@ -403,6 +440,47 @@ class EvaluationServiceImplTest {
                 org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.isNull()
         );
+    }
+
+    @Test
+    void resubmitKeepsSubmittedStatusAndLogsPreviousSubmittedState() {
+        User judge = user(4L);
+        Submission submission = submittedSubmission(9L, 1L, 10L);
+        Evaluation evaluation = evaluation(1L, judge, submission, EvaluationStatus.SUBMITTED);
+        LocalDateTime firstSubmittedAt = LocalDateTime.of(2026, 7, 1, 10, 30);
+        evaluation.setSubmittedAt(firstSubmittedAt);
+        ScoringCriterion criterion = criterion(1L, "Code", 10L, 1);
+        Score score = score(100L, evaluation, criterion, BigDecimal.TEN, "ok");
+
+        when(evaluationRepository.findById(1L)).thenReturn(Optional.of(evaluation));
+        when(judgeAssignmentRepository.findByJudgeIdAndRoundIdAndStatus(4L, 1L, AssignmentStatus.ACTIVE))
+                .thenReturn(List.of(activeAssignment(11L, 4L, 1L, 10L)));
+        when(scoringCriterionRepository.findByCriteriaSet_Round_IdAndIsActiveTrueOrderByDisplayOrderAsc(1L))
+                .thenReturn(List.of(criterion));
+        when(scoreRepository.findByEvaluation_IdOrderByCriterion_DisplayOrderAsc(1L))
+                .thenReturn(List.of(score));
+        when(evaluationRepository.save(any(Evaluation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.submitEvaluation(4L, 1L, new SubmitEvaluationRequest());
+
+        assertThat(response.getStatus()).isEqualTo(EvaluationStatus.SUBMITTED);
+        assertThat(response.getSubmittedAt()).isEqualTo(firstSubmittedAt);
+
+        ArgumentCaptor<String> oldJson = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> newJson = ArgumentCaptor.forClass(String.class);
+        verify(auditPublisher).log(
+                org.mockito.ArgumentMatchers.eq(judge),
+                org.mockito.ArgumentMatchers.eq(AuditAction.EVALUATION_SUBMITTED),
+                org.mockito.ArgumentMatchers.eq("EVALUATION"),
+                org.mockito.ArgumentMatchers.eq(1L),
+                oldJson.capture(),
+                newJson.capture(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull()
+        );
+        assertThat(oldJson.getValue()).contains("\"status\":\"SUBMITTED\"");
+        assertThat(oldJson.getValue()).contains("\"submittedAt\":\"2026-07-01T10:30\"");
+        assertThat(newJson.getValue()).contains("\"status\":\"SUBMITTED\"");
     }
 
     @Test

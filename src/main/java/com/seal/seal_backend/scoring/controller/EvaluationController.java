@@ -2,7 +2,6 @@ package com.seal.seal_backend.scoring.controller;
 
 import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.common.security.CurrentUser;
-import com.seal.seal_backend.common.api.ApiResponse;
 import com.seal.seal_backend.scoring.dto.request.SaveScoresRequest;
 import com.seal.seal_backend.scoring.dto.request.StartEvaluationRequest;
 import com.seal.seal_backend.scoring.dto.request.SubmitEvaluationRequest;
@@ -19,18 +18,13 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@RequestMapping({"/api/scoring", "/api/evaluations"})
+@RequestMapping("/api/evaluations")
 @RestController
 @RequiredArgsConstructor
 @Tag(name = "Scoring")
 public class EvaluationController {
 
     private final EvaluationService evaluationService;
-
-    @GetMapping("/ping")
-    public ApiResponse<String> ping() {
-        return ApiResponse.ok("Evaluation module is alive");
-    }
 
     @PreAuthorize("hasRole('JUDGE')")
     @GetMapping("/assigned-submissions")
