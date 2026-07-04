@@ -45,15 +45,10 @@ public class AwardController {
         if (authentication != null && authentication.getPrincipal() != null) {
             Object principal = authentication.getPrincipal();
 
-            // Bạn hãy kiểm tra xem hệ thống của bạn dùng class Principal tên là gì (VD: UserPrincipal, UserSecurity...)
-            // Dưới đây là cách bốc thông tin nếu hệ thống ép kiểu Principal về một Object chứa ID:
             try {
-                // Cách 1: Thử lấy qua phương thức getId() nếu Principal có hỗ trợ
                 java.lang.reflect.Method getIdMethod = principal.getClass().getMethod("getId");
                 userId = (Long) getIdMethod.invoke(principal);
             } catch (Exception e) {
-                // Cách 2: Phương án dự phòng nếu hệ thống lưu ID ở một nơi khác, bạn có thể tạm fix hoặc ép kiểu cụ thể
-                // Nếu chưa rõ Class Principal là gì, bạn có thể kiểm tra file cấu hình `@CurrentUser` trong dự án để copy đoạn code bốc ID của họ qua đây.
                 throw new IllegalStateException("Hệ thống chưa cấu hình đồng bộ Argument Resolver cho module Award. Lỗi: " + e.getMessage());
             }
         }
@@ -70,7 +65,14 @@ public class AwardController {
         return ResponseEntity.ok(ApiResponse.ok(awards));
     }
 
-    // 🌟 THÊM MỚI: API lấy danh sách Hạng mục (Categories) theo Event ID để test luồng
+    @GetMapping("/types")
+    @Operation(summary = "Lấy danh sách loại giải thưởng")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getAwardTypes() {
+        List<Map<String, Object>> awardTypes = awardService.getAwardTypes();
+        return ResponseEntity.ok(ApiResponse.ok(awardTypes));
+    }
+
     @GetMapping("/events/{eventId}/categories")
     @Operation(summary = "Lấy danh sách các Hạng mục của một sự kiện")
     @PreAuthorize("isAuthenticated()")

@@ -19,6 +19,10 @@ public interface AwardRepository extends JpaRepository<Award, Long> {
     // Kiểm tra xem Đội này đã nhận Giải thưởng này trong Sự kiện này chưa bằng loại
     boolean existsByEventIdAndTeamIdAndAwardType(Long eventId, Long teamId, AwardType awardType);
 
+    boolean existsByEventIdAndTeamId(Long eventId, Long teamId);
+
+    boolean existsByEventIdAndAwardType(Long eventId, AwardType awardType);
+
     // Đếm xem Giải thưởng này đã được trao cho bao nhiêu đội trong Sự kiện này
     long countByEventIdAndAwardType(Long eventId, AwardType awardType);
 }

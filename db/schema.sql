@@ -632,6 +632,7 @@ CREATE TABLE awards (
     awarded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT uq_awards_event_team_type UNIQUE (event_id, team_id, award_type),
+    CONSTRAINT uq_awards_event_award_type UNIQUE (event_id, award_type),
     CONSTRAINT fk_awards_event
         FOREIGN KEY (event_id) REFERENCES events(id)
         ON DELETE RESTRICT ON UPDATE CASCADE,

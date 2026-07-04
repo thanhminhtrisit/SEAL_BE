@@ -24,7 +24,7 @@ public class RoundAutomationTask {
     private final RankingService rankingService;
 
     // Chạy mỗi 60 giây
-    @Scheduled(fixedRate = 60000)
+    @Scheduled(fixedRate = 30000)
     public void processScoringDeadlines() {
         LocalDateTime now = LocalDateTime.now();
         // Tìm các vòng thi đang mở chấm điểm (SCORING_OPEN) và đã quá hạn

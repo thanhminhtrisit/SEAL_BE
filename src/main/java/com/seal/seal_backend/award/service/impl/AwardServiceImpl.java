@@ -4,6 +4,7 @@ import com.seal.seal_backend.award.dto.request.AwardCreateRequest;
 import com.seal.seal_backend.award.dto.response.AwardResponse;
 import com.seal.seal_backend.award.service.AwardService;
 import com.seal.seal_backend.domain.entity.*;
+import com.seal.seal_backend.domain.enums.AwardType;
 import com.seal.seal_backend.domain.repository.AwardRepository;
 import com.seal.seal_backend.domain.repository.TeamRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,15 +46,14 @@ public class AwardServiceImpl implements AwardService {
             throw new RuntimeException("Lỗi: Đội thi '" + team.getName() + "' đã bị đình chỉ và không đủ điều kiện nhận giải!");
         }
 
-        //Chống Spam: Kiểm tra đội thi đã nhận giải thưởng này trong sự kiện này chưa
-        boolean isAlreadyAwarded = awardRepository.existsByEventIdAndTeamIdAndAwardType(
-                request.eventId(),
-                request.teamId(),
-                request.awardType()
-        );
+        // Chặn một đội nhận nhiều hơn một giải bất kỳ trong cùng một sự kiện
+        if (awardRepository.existsByEventIdAndTeamId(request.eventId(), request.teamId())) {
+            throw new RuntimeException("Lỗi: Đội '" + team.getName() + "' đã được trao một giải trong sự kiện này rồi!");
+        }
 
-        if (isAlreadyAwarded) {
-            throw new RuntimeException("Lỗi: Đội '" + team.getName() + "' đã được trao giải '" + request.awardType() + "' rồi!");
+        // Chặn cùng một loại giải bị trao cho nhiều team trong cùng event
+        if (awardRepository.existsByEventIdAndAwardType(request.eventId(), request.awardType())) {
+            throw new RuntimeException("Lỗi: Giải '" + request.awardType() + "' đã được trao trong sự kiện này rồi!");
         }
 
         log.info("Coordinator (ID:{}) đang gán giải {} cho Team ID: {}", userId, request.awardType(), request.teamId());
@@ -111,6 +112,19 @@ public class AwardServiceImpl implements AwardService {
 
     @Transactional(readOnly = true)
     @Override
+    public List<Map<String, Object>> getAwardTypes() {
+        return List.of(
+                buildAwardTypeOption(AwardType.FIRST_PLACE, "Giải Nhất", true),
+                buildAwardTypeOption(AwardType.SECOND_PLACE, "Giải Nhì", true),
+                buildAwardTypeOption(AwardType.THIRD_PLACE, "Giải Ba", true),
+                buildAwardTypeOption(AwardType.BEST_TECHNICAL, "Giải Kỹ Thuật", false),
+                buildAwardTypeOption(AwardType.BEST_PRESENTATION, "Giải Thuyết Trình", false),
+                buildAwardTypeOption(AwardType.SPECIAL, "Giải Khuyến Khích", false)
+        );
+    }
+
+    @Transactional(readOnly = true)
+    @Override
     public List<Map<String, Object>> getEligibleTeamsForAward(Long eventId, Long categoryId) {
         String roundSql = "SELECT id FROM rounds " +
                 "WHERE event_id = ? " +
@@ -164,5 +178,19 @@ public class AwardServiceImpl implements AwardService {
             formattedRow.put("name", row.getOrDefault("name", row.get("NAME")));
             return formattedRow;
         }).collect(Collectors.toList());
+    }
+
+    private boolean isMainAward(AwardType awardType) {
+        return awardType == AwardType.FIRST_PLACE
+                || awardType == AwardType.SECOND_PLACE
+                || awardType == AwardType.THIRD_PLACE;
+    }
+
+    private Map<String, Object> buildAwardTypeOption(AwardType awardType, String label, boolean isMainAward) {
+        Map<String, Object> option = new HashMap<>();
+        option.put("code", awardType.name());
+        option.put("label", label);
+        option.put("isMainAward", isMainAward);
+        return option;
     }
 }
