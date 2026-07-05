@@ -296,7 +296,7 @@ public class RankingServiceImpl implements RankingService {
     @Transactional(readOnly = true)
     public List<ScoreBreakdownResponse> getScoreBreakdown(Long teamId, Long roundId) {
         log.info("Truy xuất chi tiết bảng điểm DTO (Score Breakdown) cho Team ID: {} tại Round ID: {}", teamId, roundId);
-        String sql = "SELECT u.name AS judgeName, sc.name AS criterionName, sc.weight AS criterionWeight, " +
+        String sql = "SELECT u.full_name AS judgeName, sc.name AS criterionName, sc.weight AS criterionWeight, " +
                 "s.score_value AS scoreValue, s.comment AS judgeComment " +
                 "FROM scores s " +
                 "JOIN evaluations e ON s.evaluation_id = e.id " +
@@ -304,7 +304,7 @@ public class RankingServiceImpl implements RankingService {
                 "JOIN scoring_criteria sc ON s.criterion_id = sc.id " +
                 "JOIN users u ON e.judge_id = u.id " +
                 "WHERE sub.team_id = ? AND e.round_id = ? " +
-                "ORDER BY u.name ASC, sc.weight DESC";
+                "ORDER BY u.full_name ASC, sc.weight DESC";
 
         return jdbcTemplate.query(sql, new DataClassRowMapper<>(ScoreBreakdownResponse.class), teamId, roundId);
     }
