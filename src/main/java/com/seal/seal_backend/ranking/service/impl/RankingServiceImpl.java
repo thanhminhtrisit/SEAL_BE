@@ -266,21 +266,46 @@ public class RankingServiceImpl implements RankingService {
     public void disqualifyTeam(Long teamId, String reason, Long userId) {
         log.info("Coordinator {} đang tiến hành đình chỉ Team {} với lý do: {}", userId, teamId, reason);
 
-        String updateTeamSql = "UPDATE teams SET status = 'DISQUALIFIED', " +
-                "disqualified_reason = ?, " +
-                "disqualified_by = ?, " +
-                "disqualified_at = NOW() WHERE id = ?";
+        String updateTeamSql = "UPDATE teams SET status = 'DISQUALIFIED'," +
+                " disqualified_reason = ?, " +
+                "disqualified_by = ?," +
+                " disqualified_at = NOW()" +
+                " WHERE id = ?";
         jdbcTemplate.update(updateTeamSql, reason, userId, teamId);
 
         // Thực hiện cơ chế Soft Delete đóng băng bài nộp rỗng của các vòng kế tiếp phục vụ đối chứng tra cứu lịch sử
-        String cancelSubmissionsSql =
-                "UPDATE submissions s " +
-                        "LEFT JOIN evaluations e ON s.id = e.submission_id " +
-                        "SET s.status = 'DISQUALIFIED' " +
-                        "WHERE s.team_id = ? AND e.id IS NULL";
+        String updateRankingSql = "UPDATE rankings SET total_score = 0.0, is_promoted = false, " +
+                "snapshot_note = 'Hủy kết quả do vi phạm quy chế' WHERE team_id = ?";
+        jdbcTemplate.update(updateRankingSql, teamId);
 
-        int updatedCount = jdbcTemplate.update(cancelSubmissionsSql, teamId);
-        log.info("Marked {} unscored submissions as disqualified.", updatedCount);
+        // Xóa bảng scores (Con của evaluations)
+        jdbcTemplate.update("DELETE sc FROM scores sc " +
+                "JOIN evaluations e ON sc.evaluation_id = e.id " +
+                "JOIN submissions s ON e.submission_id = s.id " +
+                "JOIN rounds rnd ON s.round_id = rnd.id " +
+                "WHERE s.team_id = ? AND rnd.status NOT IN ('IN_PROGRESS', 'SCORING_OPEN', 'COMPLETED')", teamId);
+
+        // Xóa bảng evaluations (Con của submissions)
+        jdbcTemplate.update("DELETE e FROM evaluations e " +
+                "JOIN submissions s ON e.submission_id = s.id " +
+                "JOIN rounds rnd ON s.round_id = rnd.id " +
+                "WHERE s.team_id = ? AND rnd.status NOT IN ('IN_PROGRESS', 'SCORING_OPEN', 'COMPLETED')", teamId);
+
+        // Xóa bảng submissions (Giờ thì xóa được rồi vì không còn ai dính FK nữa)
+        jdbcTemplate.update("DELETE s FROM submissions s " +
+                "JOIN rounds rnd ON s.round_id = rnd.id " +
+                "WHERE s.team_id = ? AND rnd.status NOT IN ('IN_PROGRESS', 'SCORING_OPEN', 'COMPLETED')", teamId);
+
+        // Xóa bảng rankings (Các bản ghi đặt chỗ ở vòng tương lai)
+        jdbcTemplate.update("DELETE r FROM rankings r " +
+                "JOIN rounds rnd ON r.round_id = rnd.id " +
+                "WHERE r.team_id = ? AND rnd.status NOT IN ('IN_PROGRESS', 'SCORING_OPEN', 'COMPLETED')", teamId);
+
+        // String insertLogSql = "INSERT INTO audit_logs (actor_id, action_type, target_type, target_id, reason) VALUES (?, 'DISQUALIFY_TEAM', 'TEAM', ?, ?)";
+        // jdbcTemplate.update(insertLogSql, userId, teamId, reason);
+
+        log.info("Hoàn tất đình chỉ Team ID: {}.", teamId);
+
     }
 
 
