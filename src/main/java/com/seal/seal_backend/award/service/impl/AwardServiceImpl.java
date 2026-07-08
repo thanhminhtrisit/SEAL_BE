@@ -47,13 +47,39 @@ public class AwardServiceImpl implements AwardService {
         }
 
         // Chặn một đội nhận nhiều hơn một giải bất kỳ trong cùng một sự kiện
-        if (awardRepository.existsByEventIdAndTeamId(request.eventId(), request.teamId())) {
-            throw new RuntimeException("Lỗi: Đội '" + team.getName() + "' đã được trao một giải trong sự kiện này rồi!");
+        // 1. NGĂN CHẶN NHẬN TRÙNG CHÍNH XÁC 1 LOẠI GIẢI
+        String checkExactAwardSql = "SELECT COUNT(*) FROM awards WHERE event_id = ? AND team_id = ? AND award_type = ?";
+        Integer exactCount = jdbcTemplate.queryForObject(checkExactAwardSql, Integer.class, request.eventId(), request.teamId(), request.awardType().name());
+        if (exactCount != null && exactCount > 0) {
+            throw new RuntimeException("Lỗi: Đội '" + team.getName() + "' đã nhận giải '" + request.awardType() + "' rồi!");
+        }
+
+        // 2. NGĂN CHẶN NHẬN NHIỀU HƠN 1 GIẢI CHÍNH (Nhất/Nhì/Ba)
+        boolean isRequestingMainAward = isMainAward(request.awardType());
+        if (isRequestingMainAward) {
+            String checkMainAwardSql = "SELECT COUNT(*) FROM awards WHERE event_id = ? AND team_id = ? " +
+                    "AND award_type IN ('FIRST_PLACE', 'SECOND_PLACE', 'THIRD_PLACE')";
+            Integer mainCount = jdbcTemplate.queryForObject(checkMainAwardSql, Integer.class, request.eventId(), request.teamId());
+            if (mainCount != null && mainCount > 0) {
+                throw new RuntimeException("Lỗi: Đội '" + team.getName() + "' đã có một Giải Chính (Nhất/Nhì/Ba) rồi, không thể nhận thêm Giải Chính khác!");
+            }
         }
 
         // Chặn cùng một loại giải bị trao cho nhiều team trong cùng event
-        if (awardRepository.existsByEventIdAndAwardType(request.eventId(), request.awardType())) {
-            throw new RuntimeException("Lỗi: Giải '" + request.awardType() + "' đã được trao trong sự kiện này rồi!");
+        String checkCategoryAwardSql = "SELECT COUNT(*) FROM awards a " +
+                "JOIN teams t ON a.team_id = t.id " +
+                "WHERE a.event_id = ? AND t.category_id = ? AND a.award_type = ?";
+
+        Integer awardCount = jdbcTemplate.queryForObject(
+                checkCategoryAwardSql,
+                Integer.class,
+                request.eventId(),
+                request.categoryId(),
+                request.awardType().name()
+        );
+
+        if (awardCount != null && awardCount > 0) {
+            throw new RuntimeException("Lỗi: Giải '" + request.awardType() + "' đã được trao cho Hạng mục này rồi!");
         }
 
         log.info("Coordinator (ID:{}) đang gán giải {} cho Team ID: {}", userId, request.awardType(), request.teamId());
@@ -78,11 +104,18 @@ public class AwardServiceImpl implements AwardService {
 
         Award savedAward = awardRepository.save(award);
 
+        String eventName = jdbcTemplate.queryForObject(
+                "SELECT name FROM events WHERE id = ?", String.class, request.eventId());
+        String categoryName = jdbcTemplate.queryForObject(
+                "SELECT name FROM categories WHERE id = ?", String.class, request.categoryId());
+
         return new AwardResponse(
                 savedAward.getId(),
                 request.eventId(),
+                eventName,
                 request.teamId(),
                 team.getName(),
+                categoryName,
                 savedAward.getAwardType(),
                 savedAward.getDescription(),
                 userId,
@@ -100,8 +133,10 @@ public class AwardServiceImpl implements AwardService {
                 .map(a -> new AwardResponse(
                         a.getId(),
                         a.getEvent().getId(),
+                        a.getEvent().getName(),                     // Lấy tên sự kiện
                         a.getTeam().getId(),
                         a.getTeam().getName(),
+                        a.getTeam().getCategory().getName(),        // Lấy tên hạng mục
                         a.getAwardType(),
                         a.getDescription(),
                         a.getAwardedBy().getId(),
@@ -192,5 +227,30 @@ public class AwardServiceImpl implements AwardService {
         option.put("label", label);
         option.put("isMainAward", isMainAward);
         return option;
+    }
+
+
+    @Transactional(readOnly = true)
+    @Override
+    public List<Map<String, Object>> getSuggestedAwards(Long eventId, Long categoryId) {
+        // 1. Lấy round cuối cùng (giống logic getEligibleTeamsForAward của bạn)
+        String roundSql = "SELECT id FROM rounds WHERE event_id = ? ORDER BY is_final_round DESC, order_number DESC LIMIT 1";
+        List<Map<String, Object>> roundRows = jdbcTemplate.queryForList(roundSql, eventId);
+        if (roundRows.isEmpty()) return List.of();
+        Long roundId = ((Number) roundRows.get(0).get("id")).longValue();
+
+        // 2. Truy vấn Top 3 đội (Rank 1, 2, 3)
+        String sql = "SELECT t.id AS teamId, t.name AS teamName, rk.rank_position AS rankPosition, " +
+                "CASE " +
+                "  WHEN rk.rank_position = 1 THEN 'FIRST_PLACE' " +
+                "  WHEN rk.rank_position = 2 THEN 'SECOND_PLACE' " +
+                "  WHEN rk.rank_position = 3 THEN 'THIRD_PLACE' " +
+                "  ELSE NULL END AS suggestedAwardType " +
+                "FROM rankings rk " +
+                "JOIN teams t ON rk.team_id = t.id " +
+                "WHERE rk.round_id = ? AND t.category_id = ? AND rk.rank_position <= 3 " +
+                "ORDER BY rk.rank_position ASC";
+
+        return jdbcTemplate.queryForList(sql, roundId, categoryId);
     }
 }

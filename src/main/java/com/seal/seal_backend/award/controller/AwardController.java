@@ -103,4 +103,15 @@ public class AwardController {
         awardService.publishEventResults(eventId, userId);
         return ResponseEntity.ok(ApiResponse.ok("Đã công bố kết quả thành công!"));
     }
+
+    @GetMapping("/events/{eventId}/suggestions")
+    @Operation(summary = "Lấy gợi ý giải thưởng (Top 3) cho một hạng mục")
+    @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getSuggestedAwards(
+            @PathVariable Long eventId,
+            @RequestParam Long categoryId
+    ) {
+        List<Map<String, Object>> suggestions = awardService.getSuggestedAwards(eventId, categoryId);
+        return ResponseEntity.ok(ApiResponse.ok(suggestions));
+    }
 }
