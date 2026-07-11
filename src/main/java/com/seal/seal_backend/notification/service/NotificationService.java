@@ -4,6 +4,8 @@ import com.seal.seal_backend.notification.dto.response.NotificationResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.util.List;
+
 /** OWNER: M3. In-app (+ optional email) notifications. */
 public interface NotificationService {
     void notifyUser(Long recipientId, Long eventId, String type, String title, String message);
@@ -15,4 +17,6 @@ public interface NotificationService {
     void markAsRead(Long notificationId, Long userId);
 
     void markAllAsRead(Long userId);
+
+    void notifyUsersBatch(List<Long> recipientIds, Long eventId, String type, String title, String message);
 }

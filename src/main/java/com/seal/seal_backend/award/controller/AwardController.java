@@ -1,7 +1,9 @@
 package com.seal.seal_backend.award.controller;
 
+import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.award.dto.request.AwardCreateRequest;
 import com.seal.seal_backend.award.dto.response.AwardResponse;
+import com.seal.seal_backend.award.dto.response.ParticipantResultResponse;
 import com.seal.seal_backend.award.service.AwardService;
 import com.seal.seal_backend.common.api.ApiResponse;
 import com.seal.seal_backend.common.security.CurrentUser;
@@ -93,13 +95,24 @@ public class AwardController {
         return ResponseEntity.ok(ApiResponse.ok(teams));
     }
 
-    @PostMapping("/events/{eventId}/publish")
+    @PutMapping("/events/{eventId}/publish")
     @Operation(summary = "Công bố kết quả xếp hạng và giải thưởng cho thí sinh")
     @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
     public ResponseEntity<ApiResponse<String>> publishResults(
             @PathVariable Long eventId,
-            @CurrentUser Long userId
+            Authentication authentication
     ) {
+        Long userId = null;
+        if (authentication != null && authentication.getPrincipal() != null) {
+            Object principal = authentication.getPrincipal();
+            try {
+                java.lang.reflect.Method getIdMethod = principal.getClass().getMethod("getId");
+                userId = (Long) getIdMethod.invoke(principal);
+            } catch (Exception e) {
+                throw new IllegalStateException("Hệ thống chưa cấu hình đồng bộ Argument Resolver. Lỗi: " + e.getMessage());
+            }
+        }
+
         awardService.publishEventResults(eventId, userId);
         return ResponseEntity.ok(ApiResponse.ok("Đã công bố kết quả thành công!"));
     }
@@ -113,5 +126,16 @@ public class AwardController {
     ) {
         List<Map<String, Object>> suggestions = awardService.getSuggestedAwards(eventId, categoryId);
         return ResponseEntity.ok(ApiResponse.ok(suggestions));
+    }
+
+    @GetMapping("/events/{eventId}/my-result")
+    @Operation(summary = "Lấy kết quả cá nhân của thí sinh (Chỉ xem được khi event đã COMPLETED)")
+    @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER')")
+    public ResponseEntity<ApiResponse<ParticipantResultResponse>> getMyResult(
+            @PathVariable Long eventId,
+            @CurrentUser UserPrincipal user
+    ) {
+        ParticipantResultResponse result = awardService.getParticipantResult(eventId, user.getId());
+        return ResponseEntity.ok(ApiResponse.ok(result));
     }
 }
