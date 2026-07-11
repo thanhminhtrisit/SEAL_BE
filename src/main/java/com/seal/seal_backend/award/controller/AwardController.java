@@ -93,13 +93,24 @@ public class AwardController {
         return ResponseEntity.ok(ApiResponse.ok(teams));
     }
 
-    @PostMapping("/events/{eventId}/publish")
+    @PutMapping("/events/{eventId}/publish")
     @Operation(summary = "Công bố kết quả xếp hạng và giải thưởng cho thí sinh")
     @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
     public ResponseEntity<ApiResponse<String>> publishResults(
             @PathVariable Long eventId,
-            @CurrentUser Long userId
+            Authentication authentication
     ) {
+        Long userId = null;
+        if (authentication != null && authentication.getPrincipal() != null) {
+            Object principal = authentication.getPrincipal();
+            try {
+                java.lang.reflect.Method getIdMethod = principal.getClass().getMethod("getId");
+                userId = (Long) getIdMethod.invoke(principal);
+            } catch (Exception e) {
+                throw new IllegalStateException("Hệ thống chưa cấu hình đồng bộ Argument Resolver. Lỗi: " + e.getMessage());
+            }
+        }
+
         awardService.publishEventResults(eventId, userId);
         return ResponseEntity.ok(ApiResponse.ok("Đã công bố kết quả thành công!"));
     }

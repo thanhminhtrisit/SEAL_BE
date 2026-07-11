@@ -5,6 +5,7 @@ import com.seal.seal_backend.award.dto.response.AwardResponse;
 import com.seal.seal_backend.award.service.AwardService;
 import com.seal.seal_backend.domain.entity.*;
 import com.seal.seal_backend.domain.enums.AwardType;
+import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.domain.repository.AwardRepository;
 import com.seal.seal_backend.domain.repository.TeamRepository;
 import lombok.RequiredArgsConstructor;
@@ -196,9 +197,12 @@ public class AwardServiceImpl implements AwardService {
     @Transactional
     @Override
     public void publishEventResults(Long eventId, Long userId) {
-        log.info("Coordinator (ID:{}) đang CÔNG BỐ KẾT QUẢ sự kiện ID: {}", userId, eventId);
-        String sql = "UPDATE events SET is_results_published = true WHERE id = ?";
-        jdbcTemplate.update(sql, eventId);
+        log.info("Coordinator (ID:{}) đang CÔNG BỐ KẾT QUẢ và chuyển trạng thái sự kiện ID: {} thành COMPLETED", userId, eventId);
+
+        // Chỉ cập nhật duy nhất trường status
+        String sql = "UPDATE events SET status = ? WHERE id = ?";
+
+        jdbcTemplate.update(sql, EventStatus.COMPLETED.name(), eventId);
     }
 
     @Transactional(readOnly = true)
