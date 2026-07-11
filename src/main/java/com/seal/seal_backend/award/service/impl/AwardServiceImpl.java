@@ -2,12 +2,14 @@ package com.seal.seal_backend.award.service.impl;
 
 import com.seal.seal_backend.award.dto.request.AwardCreateRequest;
 import com.seal.seal_backend.award.dto.response.AwardResponse;
+import com.seal.seal_backend.award.dto.response.ParticipantResultResponse;
 import com.seal.seal_backend.award.service.AwardService;
 import com.seal.seal_backend.domain.entity.*;
 import com.seal.seal_backend.domain.enums.AwardType;
 import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.domain.repository.AwardRepository;
 import com.seal.seal_backend.domain.repository.TeamRepository;
+import com.seal.seal_backend.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,6 +31,7 @@ public class AwardServiceImpl implements AwardService {
     private final AwardRepository awardRepository;
     private final TeamRepository teamRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final NotificationService notificationService;
 
     @Override
     @Transactional
@@ -197,12 +200,26 @@ public class AwardServiceImpl implements AwardService {
     @Transactional
     @Override
     public void publishEventResults(Long eventId, Long userId) {
-        log.info("Coordinator (ID:{}) đang CÔNG BỐ KẾT QUẢ và chuyển trạng thái sự kiện ID: {} thành COMPLETED", userId, eventId);
+        log.info("Coordinator (ID:{}) đang CÔNG BỐ KẾT QUẢ sự kiện ID: {}", userId, eventId);
 
-        // Chỉ cập nhật duy nhất trường status
+        // Cập nhật trạng thái sự kiện
         String sql = "UPDATE events SET status = ? WHERE id = ?";
-
         jdbcTemplate.update(sql, EventStatus.COMPLETED.name(), eventId);
+
+        // Lấy danh sách ID của TẤT CẢ các thành viên thuộc các đội tham gia sự kiện này
+        String findUsersSql = "SELECT tm.user_id FROM team_members tm " +
+                "JOIN teams t ON tm.team_id = t.id " +
+                "WHERE t.event_id = ?";
+
+        List<Long> participantIds = jdbcTemplate.queryForList(findUsersSql, Long.class, eventId);
+
+        // Gắn hàm gửi thông báo chạy ngầm (Sẽ không làm chậm response trả về Frontend)
+        if (!participantIds.isEmpty()) {
+            String title = "Kết quả sự kiện đã được công bố!";
+            String message = "Coordinator đã công bố bảng xếp hạng và điểm số chính thức. Hãy vào xem ngay thành tích của đội bạn nhé.";
+
+            notificationService.notifyUsersBatch(participantIds, eventId, "RESULT_PUBLISHED", title, message);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -256,5 +273,67 @@ public class AwardServiceImpl implements AwardService {
                 "ORDER BY rk.rank_position ASC";
 
         return jdbcTemplate.queryForList(sql, roundId, categoryId);
+
+
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public ParticipantResultResponse getParticipantResult(Long eventId, Long userId) {
+        // 1. KIỂM TRA BẢO MẬT: Sự kiện đã công bố chưa?
+        String eventStatusSql = "SELECT status FROM events WHERE id = ?";
+        String status = jdbcTemplate.queryForObject(eventStatusSql, String.class, eventId);
+
+        if (!"COMPLETED".equals(status)) {
+            throw new RuntimeException("Lỗi: Sự kiện này chưa công bố kết quả. Bạn không thể xem điểm lúc này!");
+        }
+
+        // 2. TÌM ĐỘI THI CỦA USER TRONG SỰ KIỆN NÀY
+        String findTeamSql = "SELECT t.id, t.name, c.name as categoryName " +
+                "FROM teams t " +
+                "JOIN team_members tm ON t.id = tm.team_id " +
+                "JOIN categories c ON t.category_id = c.id " +
+                "WHERE t.event_id = ? AND tm.user_id = ?";
+
+        List<Map<String, Object>> teamRows = jdbcTemplate.queryForList(findTeamSql, eventId, userId);
+        if (teamRows.isEmpty()) {
+            throw new RuntimeException("Bạn không tham gia sự kiện này hoặc không thuộc đội thi nào.");
+        }
+
+        Map<String, Object> teamRow = teamRows.get(0);
+        Long teamId = ((Number) teamRow.getOrDefault("id", teamRow.get("ID"))).longValue();
+        String teamName = (String) teamRow.getOrDefault("name", teamRow.get("NAME"));
+        String categoryName = (String) teamRow.getOrDefault("categoryName", teamRow.get("CATEGORYNAME"));
+
+        // 3. LẤY ĐIỂM VÀ XẾP HẠNG (Từ vòng chung kết/vòng cuối cùng)
+        String roundSql = "SELECT id FROM rounds WHERE event_id = ? ORDER BY is_final_round DESC, order_number DESC LIMIT 1";
+        List<Map<String, Object>> roundRows = jdbcTemplate.queryForList(roundSql, eventId);
+
+        Integer rankPosition = null;
+        Double totalScore = null;
+
+        if (!roundRows.isEmpty()) {
+            Long roundId = ((Number) roundRows.get(0).getOrDefault("id", roundRows.get(0).get("ID"))).longValue();
+            String rankSql = "SELECT rank_position, total_score FROM rankings WHERE round_id = ? AND team_id = ?";
+            List<Map<String, Object>> rankRows = jdbcTemplate.queryForList(rankSql, roundId, teamId);
+
+            if (!rankRows.isEmpty()) {
+                rankPosition = ((Number) rankRows.get(0).getOrDefault("rank_position", rankRows.get(0).get("RANK_POSITION"))).intValue();
+                totalScore = ((Number) rankRows.get(0).getOrDefault("total_score", rankRows.get(0).get("TOTAL_SCORE"))).doubleValue();
+            }
+        }
+
+        // 4. LẤY GIẢI THƯỞNG (Nếu có)
+        String awardSql = "SELECT award_type, description FROM awards WHERE event_id = ? AND team_id = ?";
+        List<Map<String, Object>> awardRows = jdbcTemplate.queryForList(awardSql, eventId, teamId);
+
+        String awardType = null;
+        String awardDesc = null;
+        if (!awardRows.isEmpty()) {
+            awardType = (String) awardRows.get(0).getOrDefault("award_type", awardRows.get(0).get("AWARD_TYPE"));
+            awardDesc = (String) awardRows.get(0).getOrDefault("description", awardRows.get(0).get("DESCRIPTION"));
+        }
+
+        return new ParticipantResultResponse(teamId, teamName, categoryName, rankPosition, totalScore, awardType, awardDesc);
     }
 }

@@ -1,7 +1,9 @@
 package com.seal.seal_backend.award.controller;
 
+import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.award.dto.request.AwardCreateRequest;
 import com.seal.seal_backend.award.dto.response.AwardResponse;
+import com.seal.seal_backend.award.dto.response.ParticipantResultResponse;
 import com.seal.seal_backend.award.service.AwardService;
 import com.seal.seal_backend.common.api.ApiResponse;
 import com.seal.seal_backend.common.security.CurrentUser;
@@ -124,5 +126,16 @@ public class AwardController {
     ) {
         List<Map<String, Object>> suggestions = awardService.getSuggestedAwards(eventId, categoryId);
         return ResponseEntity.ok(ApiResponse.ok(suggestions));
+    }
+
+    @GetMapping("/events/{eventId}/my-result")
+    @Operation(summary = "Lấy kết quả cá nhân của thí sinh (Chỉ xem được khi event đã COMPLETED)")
+    @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER')")
+    public ResponseEntity<ApiResponse<ParticipantResultResponse>> getMyResult(
+            @PathVariable Long eventId,
+            @CurrentUser UserPrincipal user
+    ) {
+        ParticipantResultResponse result = awardService.getParticipantResult(eventId, user.getId());
+        return ResponseEntity.ok(ApiResponse.ok(result));
     }
 }

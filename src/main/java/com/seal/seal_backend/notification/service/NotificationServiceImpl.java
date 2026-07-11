@@ -9,6 +9,7 @@ import com.seal.seal_backend.domain.repository.UserRepository;
 import com.seal.seal_backend.notification.dto.response.NotificationResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -111,5 +112,38 @@ public class NotificationServiceImpl implements NotificationService {
                 n.getIsRead(),
                 n.getCreatedAt()
         );
+    }
+
+    @Override
+    @Async // Đẩy hàm này chạy ngầm (Background thread) để không làm chậm API Publish
+    @Transactional
+    public void notifyUsersBatch(List<Long> recipientIds, Long eventId, String type, String title, String message) {
+        if (recipientIds == null || recipientIds.isEmpty()) return;
+
+        // Dùng getReferenceById thay vì findById để tạo Proxy (chỉ lấy ID, không gọi DB)
+        Event eventRef = null;
+        if (eventId != null) {
+            eventRef = events.getReferenceById(eventId);
+        }
+
+        Event finalEventRef = eventRef;
+
+        // Tạo danh sách thông báo
+        List<Notification> notificationList = recipientIds.stream().map(userId -> {
+            Notification n = new Notification();
+            // Dùng getReferenceById cho User để tránh N câu SELECT User
+            n.setRecipient(users.getReferenceById(userId));
+            n.setEvent(finalEventRef);
+            n.setNotificationType(type);
+            n.setTitle(title);
+            n.setMessage(message);
+            n.setIsRead(false);
+            return n;
+        }).toList();
+
+        // Dùng saveAll để gom chung thành Batch Insert (Chỉ 1 lệnh gọi DB)
+        notifications.saveAll(notificationList);
+
+        System.out.println("Đã gửi thành công " + recipientIds.size() + " thông báo chạy ngầm!");
     }
 }

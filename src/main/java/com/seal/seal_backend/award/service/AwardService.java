@@ -2,6 +2,7 @@ package com.seal.seal_backend.award.service;
 
 import com.seal.seal_backend.award.dto.request.AwardCreateRequest;
 import com.seal.seal_backend.award.dto.response.AwardResponse;
+import com.seal.seal_backend.award.dto.response.ParticipantResultResponse;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -31,4 +32,7 @@ public interface AwardService {
 
     // Gợi ý awards cho từng team
     List<Map<String, Object>> getSuggestedAwards(Long eventId, Long categoryId);
+
+    // Lấy kết quả cá nhân cho thí sinh
+    ParticipantResultResponse getParticipantResult(Long eventId, Long userId);
 }
