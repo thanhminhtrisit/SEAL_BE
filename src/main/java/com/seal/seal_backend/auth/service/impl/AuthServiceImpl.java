@@ -4,9 +4,12 @@ import com.seal.seal_backend.auth.dto.request.CreateGuestJudgeRequest;
 import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
+import com.seal.seal_backend.auth.dto.response.GoogleAuthResponse;
 import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
 import com.seal.seal_backend.auth.dto.response.MeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
+import com.seal.seal_backend.auth.dto.response.RegisterResponse;
+import com.seal.seal_backend.auth.security.GoogleTokenVerifier;
 import com.seal.seal_backend.auth.security.JwtTokenProvider;
 import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.auth.service.AuthService;
@@ -20,6 +23,7 @@ import com.seal.seal_backend.domain.entity.User;
 import com.seal.seal_backend.domain.enums.AccountType;
 import com.seal.seal_backend.domain.enums.UserStatus;
 import com.seal.seal_backend.domain.repository.RoleRepository;
+import com.seal.seal_backend.domain.repository.SystemConfigRepository;
 import com.seal.seal_backend.domain.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -43,15 +47,19 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final AuditPublisher auditPublisher;
+    private final GoogleTokenVerifier googleTokenVerifier;
+    private final SystemConfigRepository systemConfigRepository;
 
     @Override
     @Transactional
-    public Long register(RegisterRequest req) {
+    public RegisterResponse register(RegisterRequest req) {
         validatePasswordStrength(req.password());
         validateStudentFields(req);
 
         return userRepository.findByEmail(req.email())
-                .map(existing -> reactivateRejected(existing, req))
+                // Re-registration of a REJECTED account NEVER auto-approves —
+                // a human already said no once, so a human must say yes.
+                .map(existing -> RegisterResponse.pending(reactivateRejected(existing, req)))
                 .orElseGet(() -> createNew(req));
     }
 
@@ -77,7 +85,7 @@ public class AuthServiceImpl implements AuthService {
         return existing.getId();
     }
 
-    private Long createNew(RegisterRequest req) {
+    private RegisterResponse createNew(RegisterRequest req) {
         Role teamMemberRole = roleRepository.findByCode("TEAM_MEMBER")
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "System role TEAM_MEMBER not found — ensure db/schema.sql seed data is loaded."));
@@ -94,7 +102,34 @@ public class AuthServiceImpl implements AuthService {
         user.setPrimaryRole(teamMemberRole);
         user.setStatus(UserStatus.PENDING);
 
-        return userRepository.save(user).getId();
+        boolean autoApprove = isAutoApproveEnabled();
+        if (autoApprove) {
+            // Registration already passed BR-USR-03/05 validation above → activate immediately.
+            // approvedBy stays null (no human approver); the audit row carries the why.
+            user.setStatus(UserStatus.ACTIVE);
+            user.setApprovedAt(LocalDateTime.now());
+        }
+
+        User saved = userRepository.save(user);
+
+        if (autoApprove) {
+            auditPublisher.log(saved, AuditAction.ACCOUNT_AUTO_APPROVED, "USER", saved.getId(),
+                    null, "{\"status\":\"ACTIVE\"}",
+                    "AUTO_APPROVE_ACCOUNTS=true — registration passed BR-USR-03/05 validation", null);
+            return RegisterResponse.active(saved.getId());
+        }
+        return RegisterResponse.pending(saved.getId());
+    }
+
+    /**
+     * Governance flag (system_configs.AUTO_APPROVE_ACCOUNTS). Absent or anything but "true"
+     * = manual coordinator approval (original FR-AUTH-08 behaviour). Flip the row to 'true'
+     * to enable auto-approval — no deploy needed, and it can be turned off the same way.
+     */
+    private boolean isAutoApproveEnabled() {
+        return systemConfigRepository.findByConfigKey("AUTO_APPROVE_ACCOUNTS")
+                .map(c -> c.getConfigValue() != null && "true".equalsIgnoreCase(c.getConfigValue().trim()))
+                .orElse(false);
     }
 
     @Override
@@ -133,6 +168,90 @@ public class AuthServiceImpl implements AuthService {
         return new AuthResponse(
                 jwtTokenProvider.generateAccessToken(principal),
                 jwtTokenProvider.generateRefreshToken(principal));
+    }
+
+    /**
+     * Google sign-in/sign-up (GIS ID-token flow).
+     * Deliberately mirrors the existing flows instead of replacing them:
+     * - unknown email  -> account created PENDING + TEAM_MEMBER, exactly like register (FR-AUTH-03 intact);
+     * - PENDING        -> no tokens, FE shows "awaiting approval";
+     * - ACTIVE         -> same JWT pair as password login;
+     * - LOCKED/REJECTED/INACTIVE -> same BR-AUTH-03/04/05 errors as password login.
+     */
+    @Override
+    @Transactional
+    public GoogleAuthResponse loginWithGoogle(String idToken) {
+        GoogleTokenVerifier.GoogleUser google = googleTokenVerifier.verify(idToken);
+        if (!google.emailVerified()) {
+            throw new BusinessRuleException("BR-AUTH-09", "Google account email is not verified.");
+        }
+
+        User user = userRepository.findByEmail(google.email())
+                .orElseGet(() -> createFromGoogle(google));
+
+        switch (user.getStatus()) {
+            case PENDING -> {
+                return GoogleAuthResponse.pending(user.getId());
+            }
+            case LOCKED ->
+                throw new BusinessRuleException("BR-AUTH-03",
+                        "Your account is locked. Reason: "
+                        + (user.getLockedReason() != null ? user.getLockedReason() : "contact admin."));
+            case REJECTED ->
+                throw new BusinessRuleException("BR-AUTH-04",
+                        "Your account registration was rejected.");
+            case INACTIVE ->
+                throw new BusinessRuleException("BR-AUTH-05",
+                        "Your account is inactive. Contact admin.");
+            case ACTIVE -> { /* proceed */ }
+        }
+
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepository.save(user);
+
+        UserPrincipal principal = UserPrincipal.from(user);
+        return GoogleAuthResponse.authenticated(
+                user.getId(),
+                jwtTokenProvider.generateAccessToken(principal),
+                jwtTokenProvider.generateRefreshToken(principal));
+    }
+
+    /**
+     * First Google sign-in = sign-up through the SAME participant path as register:
+     * status PENDING, primary role TEAM_MEMBER. Password is a random bcrypt hash so the
+     * account is Google-only until the user sets a password (schema unchanged, column NOT NULL).
+     * studentId/university are left null — completed later in profile, coordinator sees them at approval.
+     */
+    private User createFromGoogle(GoogleTokenVerifier.GoogleUser google) {
+        Role teamMemberRole = roleRepository.findByCode("TEAM_MEMBER")
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "System role TEAM_MEMBER not found — ensure db/schema.sql seed data is loaded."));
+
+        User user = new User();
+        user.setEmail(google.email());
+        user.setFullName(google.fullName() != null ? google.fullName() : google.email());
+        user.setPasswordHash(passwordEncoder.encode(generateTemporaryPassword()));
+        user.setIsFptStudent(false);
+        user.setAccountType(AccountType.PARTICIPANT);
+        user.setPrimaryRole(teamMemberRole);
+        user.setStatus(UserStatus.PENDING);
+
+        boolean autoApprove = isAutoApproveEnabled();
+        if (autoApprove) {
+            // Google sign-up passes an even stronger check than form validation:
+            // Google has verified ownership of the email (email_verified=true).
+            user.setStatus(UserStatus.ACTIVE);
+            user.setApprovedAt(LocalDateTime.now());
+        }
+
+        User saved = userRepository.save(user);
+
+        if (autoApprove) {
+            auditPublisher.log(saved, AuditAction.ACCOUNT_AUTO_APPROVED, "USER", saved.getId(),
+                    null, "{\"status\":\"ACTIVE\"}",
+                    "AUTO_APPROVE_ACCOUNTS=true — Google-verified email", null);
+        }
+        return saved;
     }
 
     @Override

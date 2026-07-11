@@ -77,9 +77,8 @@ public class BudgetServiceImpl implements BudgetService {
         if (req.currency() != null && !req.currency().isBlank()) {
             budget.setCurrency(req.currency());
         }
-        if (req.status() != null) {
-            budget.setStatus(req.status());
-        }
+        // FR-BGT-05: status is NOT client-settable — budget is approved together with the
+        // event by the Super Coordinator (separation of duties), never via this PATCH.
         budget = eventBudgetRepository.save(budget);
         return buildResponse(budget);
     }

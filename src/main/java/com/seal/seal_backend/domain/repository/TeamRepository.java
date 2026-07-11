@@ -25,7 +25,13 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
 
     @Query("SELECT COUNT(tm) > 0 FROM TeamMember tm " +
            "WHERE tm.user.id = :userId AND tm.team.event.id = :eventId " +
-           "AND tm.status = com.seal.seal_backend.domain.enums.TeamMemberStatus.ACTIVE")
+           "AND tm.status = com.seal.seal_backend.domain.enums.TeamMemberStatus.ACTIVE " +
+           // "Already in a team" only counts teams still in the running — members of
+           // REJECTED/WITHDRAWN/DISQUALIFIED teams are free to register/join another team,
+           // otherwise one rejection dead-locks the whole roster for the event.
+           "AND tm.team.status IN (com.seal.seal_backend.domain.enums.TeamStatus.REGISTERED, " +
+           "com.seal.seal_backend.domain.enums.TeamStatus.APPROVED, " +
+           "com.seal.seal_backend.domain.enums.TeamStatus.ACTIVE)")
     boolean existsActiveMemberByUserIdAndEventId(@Param("userId") Long userId, @Param("eventId") Long eventId);
 
     @Query("SELECT COUNT(t) FROM Team t WHERE t.event.id = :eventId " +

@@ -145,11 +145,68 @@ public class TeamController {
 
     @DeleteMapping("/{teamId}/members/{targetUserId}")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Remove a member from team (leader or self; leader cannot be removed)")
+    @Operation(summary = "Remove a member (leader kicks → REMOVED) or leave (self → LEFT)",
+               description = "BR-TEAM-08: blocked once the team is APPROVED/ACTIVE — roster is frozen at review.")
     public ApiResponse<TeamResponse> removeMember(
             @PathVariable Long teamId,
             @PathVariable Long targetUserId,
             @CurrentUser UserPrincipal user) {
         return ApiResponse.ok(teamService.removeMember(teamId, targetUserId, user.getId()));
+    }
+
+    // ─── Team lifecycle & info (FR-TEAM-06, BR-TEAM-05/08) ───────────────────
+
+    @PatchMapping("/{teamId}")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Update team name/description (FR-TEAM-06) — leader only, before approval")
+    public ApiResponse<TeamResponse> updateTeam(
+            @PathVariable Long teamId,
+            @Valid @RequestBody UpdateTeamRequest req,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok(teamService.updateTeam(teamId, req, user.getId()));
+    }
+
+    @PostMapping("/{teamId}/resubmit")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Resubmit a REJECTED team for review (REJECTED → REGISTERED)",
+               description = "Leader only, within the registration window. Clears the previous rejection reason.")
+    public ApiResponse<TeamResponse> resubmitTeam(
+            @PathVariable Long teamId,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Team resubmitted for review.",
+                teamService.resubmitTeam(teamId, user.getId()));
+    }
+
+    @PutMapping("/{teamId}/leader")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Transfer leadership to an ACTIVE member (BR-TEAM-05)")
+    public ApiResponse<TeamResponse> transferLeadership(
+            @PathVariable Long teamId,
+            @Valid @RequestBody TransferLeadershipRequest req,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Leadership transferred.",
+                teamService.transferLeadership(teamId, req, user.getId()));
+    }
+
+    @PostMapping("/{teamId}/withdraw")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Withdraw the team from the event (→ WITHDRAWN)",
+               description = "Leader only, before the event starts. Members become free to join other teams.")
+    public ApiResponse<TeamResponse> withdrawTeam(
+            @PathVariable Long teamId,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Team withdrawn.",
+                teamService.withdrawTeam(teamId, user.getId()));
+    }
+
+    @DeleteMapping("/{teamId}/invitations/{invitationId}")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Revoke a PENDING invitation (→ CANCELLED) — leader only")
+    public ApiResponse<InvitationResponse> revokeInvitation(
+            @PathVariable Long teamId,
+            @PathVariable Long invitationId,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Invitation revoked.",
+                teamService.revokeInvitation(teamId, invitationId, user.getId()));
     }
 }

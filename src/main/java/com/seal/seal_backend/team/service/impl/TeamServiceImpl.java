@@ -40,20 +40,8 @@ public class TeamServiceImpl implements TeamService {
         Event event = findEvent(req.eventId());
         Category category = findCategory(req.categoryId(), req.eventId());
 
-        // BR-TEAM-04: event must be OPEN for team registration
-        if (event.getStatus() != EventStatus.OPEN) {
-            throw new BusinessRuleException("BR-TEAM-04",
-                    "Event is not open for registration (status: " + event.getStatus() + ")");
-        }
-
-        // BR-TEAM-04: must be within the event's registration window
-        LocalDateTime now = LocalDateTime.now();
-        if (event.getRegistrationStart() != null && now.isBefore(event.getRegistrationStart())) {
-            throw new BusinessRuleException("BR-TEAM-04", "Registration window has not opened yet");
-        }
-        if (event.getRegistrationEnd() != null && now.isAfter(event.getRegistrationEnd())) {
-            throw new BusinessRuleException("BR-TEAM-04", "Registration window has closed");
-        }
+        // BR-TEAM-04: event OPEN + within registration window
+        validateRegistrationOpen(event);
 
         User creator = userRepository.findById(creatorId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + creatorId));
@@ -134,21 +122,28 @@ public class TeamServiceImpl implements TeamService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + inviterId));
 
         // Only LEADER may invite
-        boolean isLeader = teamMemberRepository.findByTeamId(teamId).stream()
-                .anyMatch(m -> m.getUser().getId().equals(inviterId)
-                        && m.getMemberRole() == TeamMemberRole.LEADER
-                        && m.getStatus() == TeamMemberStatus.ACTIVE);
-        if (!isLeader) {
-            throw new ForbiddenActionException("Only the team leader can send invitations");
-        }
+        requireActiveLeader(teamId, inviterId, "send invitations");
 
-        // BR-TEAM-06: duplicate invite (same team + email)
-        if (teamInvitationRepository.existsByTeamIdAndEmail(teamId, req.email())) {
+        // BR-TEAM-08: roster changes only while team is awaiting review
+        if (team.getStatus() != TeamStatus.REGISTERED) {
+            throw new BusinessRuleException("BR-TEAM-08",
+                    "Invitations are only allowed while the team is REGISTERED (current: "
+                    + team.getStatus() + ")");
+        }
+        // BR-TEAM-04: joining is part of registration — event must still be open
+        validateRegistrationOpen(team.getEvent());
+
+        // BR-TEAM-06 + DB UNIQUE(team_id,email): one invitation row per (team,email).
+        // PENDING blocks a duplicate; DECLINED/EXPIRED/CANCELLED rows are RE-USED for re-invites.
+        TeamInvitation existing = teamInvitationRepository
+                .findByTeamIdAndEmail(teamId, req.email()).orElse(null);
+        if (existing != null && existing.getStatus() == InvitationStatus.PENDING) {
             throw new BusinessRuleException("BR-TEAM-06",
                     "An invitation has already been sent to " + req.email() + " for this team");
         }
 
-        // BR-TEAM-06: invitee already active in another team for this event
+        // BR-TEAM-06: invitee already active in a running team for this event
+        // (also covers ACCEPTED invitations whose member is still active in this team)
         userRepository.findByEmail(req.email()).ifPresent(invitee -> {
             if (teamRepository.existsActiveMemberByUserIdAndEventId(invitee.getId(), team.getEvent().getId())) {
                 throw new BusinessRuleException("BR-TEAM-06",
@@ -162,11 +157,12 @@ public class TeamServiceImpl implements TeamService {
             throw new BusinessRuleException("BR-CAP-03", "Nhóm đã đủ sĩ số tối đa");
         }
 
-        TeamInvitation inv = new TeamInvitation();
+        TeamInvitation inv = existing != null ? existing : new TeamInvitation();
         inv.setTeam(team);
         inv.setEmail(req.email());
         inv.setInvitedBy(inviter);
         inv.setStatus(InvitationStatus.PENDING);
+        inv.setAcceptedAt(null);
         userRepository.findByEmail(req.email()).ifPresent(inv::setInvitedUser);
         inv.setExpiresAt(LocalDateTime.now().plusDays(7));
 
@@ -232,6 +228,15 @@ public class TeamServiceImpl implements TeamService {
         Team team = inv.getTeam();
         Long eventId = team.getEvent().getId();
 
+        // BR-TEAM-08: roster is frozen once the team has been reviewed — otherwise a
+        // late accept silently changes an APPROVED team AFTER the size check at review.
+        if (team.getStatus() != TeamStatus.REGISTERED) {
+            throw new BusinessRuleException("BR-TEAM-08",
+                    "This team can no longer accept members (status: " + team.getStatus() + ")");
+        }
+        // BR-TEAM-04: joining is part of registration — event must still be open
+        validateRegistrationOpen(team.getEvent());
+
         // BR-TEAM-02: user must not already belong to any team in this event
         if (teamRepository.existsActiveMemberByUserIdAndEventId(userId, eventId)) {
             throw new BusinessRuleException("BR-TEAM-02",
@@ -250,12 +255,20 @@ public class TeamServiceImpl implements TeamService {
             throw new BusinessRuleException("BR-CAP-02", "Đã đạt số người tham gia tối đa của sự kiện");
         }
 
-        // Create the new TeamMember
-        TeamMember member = new TeamMember();
-        member.setTeam(team);
-        member.setUser(user);
+        // Create OR re-activate the TeamMember — (team_id,user_id) is the composite PK,
+        // so a user who LEFT/was REMOVED must reuse the old row, not insert a duplicate.
+        TeamMember member = teamMemberRepository.findByTeamId(team.getId()).stream()
+                .filter(m -> m.getUser().getId().equals(userId))
+                .findFirst()
+                .orElseGet(() -> {
+                    TeamMember m = new TeamMember();
+                    m.setTeam(team);
+                    m.setUser(user);
+                    return m;
+                });
         member.setMemberRole(TeamMemberRole.MEMBER);
         member.setStatus(TeamMemberStatus.ACTIVE);
+        member.setLeftAt(null);
         teamMemberRepository.save(member);
 
         // Accept and link user to invitation
@@ -302,22 +315,7 @@ public class TeamServiceImpl implements TeamService {
         Event event = team.getEvent();
 
         // Only leader may change category
-        boolean isLeader = teamMemberRepository.findByTeamId(teamId).stream()
-                .anyMatch(m -> m.getUser().getId().equals(requesterId)
-                        && m.getMemberRole() == TeamMemberRole.LEADER
-                        && m.getStatus() == TeamMemberStatus.ACTIVE);
-        if (!isLeader) {
-            throw new ForbiddenActionException("Only the team leader can change the category");
-        }
-
-        // BR-TEAM-04: must be within the event's registration window
-        LocalDateTime now = LocalDateTime.now();
-        if (event.getRegistrationStart() != null && now.isBefore(event.getRegistrationStart())) {
-            throw new BusinessRuleException("BR-TEAM-04", "Registration window has not opened yet");
-        }
-        if (event.getRegistrationEnd() != null && now.isAfter(event.getRegistrationEnd())) {
-            throw new BusinessRuleException("BR-TEAM-04", "Registration window has closed");
-        }
+        requireActiveLeader(teamId, requesterId, "change the category");
 
         // FIX #2: REMOVED wrong "one active team per category" block.
         // BR-TEAM-03 means each TEAM has exactly 1 category (enforced by the DB column category_id).
@@ -327,6 +325,9 @@ public class TeamServiceImpl implements TeamService {
             throw new BusinessRuleException("BR-TEAM-03",
                     "Cannot change category of an approved/active team without re-registration");
         }
+
+        // BR-TEAM-04: category changes are part of registration — window must be open
+        validateRegistrationOpen(event);
 
         Category newCategory = findCategory(req.categoryId(), event.getId());
 
@@ -393,6 +394,13 @@ public class TeamServiceImpl implements TeamService {
     public TeamResponse removeMember(Long teamId, Long targetUserId, Long requesterId) {
         Team team = findTeam(teamId);
 
+        // BR-TEAM-08: roster is frozen after review — the coordinator approved THIS roster.
+        // Leaving a REGISTERED or REJECTED team is fine.
+        if (team.getStatus() == TeamStatus.APPROVED || team.getStatus() == TeamStatus.ACTIVE) {
+            throw new BusinessRuleException("BR-TEAM-08",
+                    "Team roster is locked after approval; ask the coordinator to handle roster changes");
+        }
+
         List<TeamMember> allMembers = teamMemberRepository.findByTeamId(teamId);
 
         boolean isLeader = allMembers.stream()
@@ -414,10 +422,11 @@ public class TeamServiceImpl implements TeamService {
 
         if (target.getMemberRole() == TeamMemberRole.LEADER) {
             throw new BusinessRuleException("BR-TEAM-07",
-                    "The team leader cannot be removed; transfer leadership first");
+                    "The team leader cannot be removed; transfer leadership first (PUT /api/teams/{id}/leader)");
         }
 
-        target.setStatus(TeamMemberStatus.REMOVED);
+        // LEFT = voluntary exit, REMOVED = kicked by leader (schema has both states)
+        target.setStatus(isSelf ? TeamMemberStatus.LEFT : TeamMemberStatus.REMOVED);
         target.setLeftAt(LocalDateTime.now());
         teamMemberRepository.save(target);
 
@@ -426,7 +435,170 @@ public class TeamServiceImpl implements TeamService {
         return TeamResponse.from(team, members);
     }
 
+    // ─── FR-TEAM-06: Update team info ─────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public TeamResponse updateTeam(Long teamId, UpdateTeamRequest req, Long requesterId) {
+        Team team = findTeam(teamId);
+        requireActiveLeader(teamId, requesterId, "update the team");
+
+        if (team.getStatus() != TeamStatus.REGISTERED && team.getStatus() != TeamStatus.REJECTED) {
+            throw new BusinessRuleException("BR-TEAM-08",
+                    "Team info can only be edited before approval (current: " + team.getStatus() + ")");
+        }
+        if (req.name() != null && !req.name().isBlank() && !req.name().equals(team.getName())) {
+            if (teamRepository.existsByEventIdAndName(team.getEvent().getId(), req.name())) {
+                throw new BusinessRuleException("TEAM-NAME-CONFLICT",
+                        "Team name '" + req.name() + "' already exists in this event");
+            }
+            team.setName(req.name());
+        }
+        if (req.description() != null) {
+            team.setDescription(req.description());
+        }
+        return toResponse(teamRepository.save(team));
+    }
+
+    // ─── Resubmit after rejection (REJECTED → REGISTERED) ────────────────────
+
+    @Override
+    @Transactional
+    public TeamResponse resubmitTeam(Long teamId, Long requesterId) {
+        Team team = findTeam(teamId);
+        requireActiveLeader(teamId, requesterId, "resubmit the team");
+
+        if (team.getStatus() != TeamStatus.REJECTED) {
+            throw new BusinessRuleException("BR-TEAM-05",
+                    "Only REJECTED teams can be resubmitted (current: " + team.getStatus() + ")");
+        }
+        // Resubmission is a registration action — window must still be open
+        validateRegistrationOpen(team.getEvent());
+
+        team.setStatus(TeamStatus.REGISTERED);
+        team.setRejectionReason(null);
+        team.setApprovedBy(null);
+        team.setApprovedAt(null);
+        return toResponse(teamRepository.save(team));
+    }
+
+    // ─── BR-TEAM-05: Transfer leadership ──────────────────────────────────────
+
+    @Override
+    @Transactional
+    public TeamResponse transferLeadership(Long teamId, TransferLeadershipRequest req, Long requesterId) {
+        Team team = findTeam(teamId);
+        if (team.getStatus() == TeamStatus.WITHDRAWN || team.getStatus() == TeamStatus.DISQUALIFIED) {
+            throw new BusinessRuleException("BR-TEAM-08",
+                    "Cannot transfer leadership of a " + team.getStatus() + " team");
+        }
+        if (requesterId.equals(req.newLeaderId())) {
+            throw new BusinessRuleException("BR-TEAM-05", "You are already the team leader");
+        }
+
+        List<TeamMember> members = teamMemberRepository.findByTeamId(teamId);
+        TeamMember current = members.stream()
+                .filter(m -> m.getUser().getId().equals(requesterId)
+                        && m.getMemberRole() == TeamMemberRole.LEADER
+                        && m.getStatus() == TeamMemberStatus.ACTIVE)
+                .findFirst()
+                .orElseThrow(() -> new ForbiddenActionException(
+                        "Only the current team leader can transfer leadership"));
+        TeamMember target = members.stream()
+                .filter(m -> m.getUser().getId().equals(req.newLeaderId())
+                        && m.getStatus() == TeamMemberStatus.ACTIVE)
+                .findFirst()
+                .orElseThrow(() -> new BusinessRuleException("BR-TEAM-05",
+                        "New leader must be an ACTIVE member of this team"));
+
+        current.setMemberRole(TeamMemberRole.MEMBER);
+        target.setMemberRole(TeamMemberRole.LEADER);
+        teamMemberRepository.save(current);
+        teamMemberRepository.save(target);
+
+        team.setLeader(target.getUser());
+        return toResponse(teamRepository.save(team));
+    }
+
+    // ─── Withdraw team (→ WITHDRAWN, members freed by the active-member query) ─
+
+    @Override
+    @Transactional
+    public TeamResponse withdrawTeam(Long teamId, Long requesterId) {
+        Team team = findTeam(teamId);
+        requireActiveLeader(teamId, requesterId, "withdraw the team");
+
+        if (team.getStatus() == TeamStatus.WITHDRAWN || team.getStatus() == TeamStatus.DISQUALIFIED) {
+            throw new BusinessRuleException("BR-TEAM-08", "Team is already " + team.getStatus());
+        }
+        // Realistic cut-off: withdrawing mid-competition would corrupt rankings —
+        // after the event starts, removal goes through the coordinator (disqualify/no-show).
+        if (team.getEvent().getStatus() != EventStatus.OPEN) {
+            throw new BusinessRuleException("BR-TEAM-08",
+                    "Teams can only withdraw before the event starts (event status: "
+                    + team.getEvent().getStatus() + ")");
+        }
+
+        team.setStatus(TeamStatus.WITHDRAWN);
+        return toResponse(teamRepository.save(team));
+    }
+
+    // ─── Revoke a PENDING invitation (→ CANCELLED) ───────────────────────────
+
+    @Override
+    @Transactional
+    public InvitationResponse revokeInvitation(Long teamId, Long invitationId, Long requesterId) {
+        findTeam(teamId);
+        requireActiveLeader(teamId, requesterId, "revoke invitations");
+
+        TeamInvitation inv = teamInvitationRepository.findById(invitationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Invitation not found: " + invitationId));
+        if (!inv.getTeam().getId().equals(teamId)) {
+            throw new ResourceNotFoundException(
+                    "Invitation " + invitationId + " does not belong to team " + teamId);
+        }
+        if (inv.getStatus() != InvitationStatus.PENDING) {
+            throw new BusinessRuleException("INV-STATUS",
+                    "Only PENDING invitations can be revoked (current: " + inv.getStatus() + ")");
+        }
+
+        inv.setStatus(InvitationStatus.CANCELLED);
+        return InvitationResponse.from(teamInvitationRepository.save(inv));
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    /** BR-TEAM-04: event must be OPEN and 'now' within [registrationStart, registrationEnd]. */
+    private void validateRegistrationOpen(Event event) {
+        if (event.getStatus() != EventStatus.OPEN) {
+            throw new BusinessRuleException("BR-TEAM-04",
+                    "Event is not open for registration (status: " + event.getStatus() + ")");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (event.getRegistrationStart() != null && now.isBefore(event.getRegistrationStart())) {
+            throw new BusinessRuleException("BR-TEAM-04", "Registration window has not opened yet");
+        }
+        if (event.getRegistrationEnd() != null && now.isAfter(event.getRegistrationEnd())) {
+            throw new BusinessRuleException("BR-TEAM-04", "Registration window has closed");
+        }
+    }
+
+    /** Requester must be the ACTIVE LEADER of the team. */
+    private void requireActiveLeader(Long teamId, Long userId, String action) {
+        boolean isLeader = teamMemberRepository.findByTeamId(teamId).stream()
+                .anyMatch(m -> m.getUser().getId().equals(userId)
+                        && m.getMemberRole() == TeamMemberRole.LEADER
+                        && m.getStatus() == TeamMemberStatus.ACTIVE);
+        if (!isLeader) {
+            throw new ForbiddenActionException("Only the team leader can " + action);
+        }
+    }
+
+    private TeamResponse toResponse(Team team) {
+        List<TeamMemberResponse> members = teamMemberRepository.findByTeamId(team.getId())
+                .stream().map(TeamMemberResponse::from).toList();
+        return TeamResponse.from(team, members);
+    }
 
     private Team findTeam(Long id) {
         return teamRepository.findById(id)

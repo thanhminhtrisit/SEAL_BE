@@ -1,11 +1,13 @@
 package com.seal.seal_backend.auth.controller;
 
 import com.seal.seal_backend.auth.dto.request.CreateGuestJudgeRequest;
+import com.seal.seal_backend.auth.dto.request.GoogleAuthRequest;
 import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.request.RejectAccountRequest;
 import com.seal.seal_backend.auth.dto.response.AccountStatusResponse;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
+import com.seal.seal_backend.auth.dto.response.GoogleAuthResponse;
 import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
 import com.seal.seal_backend.auth.dto.response.MeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
@@ -60,13 +62,17 @@ public class AuthController {
 
     @PostMapping("/register")
     @Operation(summary = "Register a new participant account (FR-AUTH-01/02)",
-               description = "Creates account with status PENDING. Admin must approve before login is allowed.")
+               description = "Creates account with status PENDING by default. If system config "
+                       + "AUTO_APPROVE_ACCOUNTS=true, valid registrations are activated immediately "
+                       + "(audited as ACCOUNT_AUTO_APPROVED); manual approval endpoints remain available.")
     public ResponseEntity<ApiResponse<RegisterResponse>> register(
             @Valid @RequestBody RegisterRequest req) {
-        Long userId = authService.register(req);
+        RegisterResponse res = authService.register(req);
+        String message = "ACTIVE".equals(res.status())
+                ? "Account created and auto-approved. You can log in now."
+                : "Account created. Awaiting admin approval.";
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok("Account created. Awaiting admin approval.",
-                        RegisterResponse.pending(userId)));
+                .body(ApiResponse.ok(message, res));
     }
 
     @PostMapping("/login")
@@ -75,6 +81,21 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponse>> login(
             @Valid @RequestBody LoginRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(authService.login(req)));
+    }
+
+    @PostMapping("/google")
+    @Operation(summary = "Sign in / sign up with Google (GIS ID-token flow)",
+               description = "Verifies a Google ID token. Unknown emails are registered as PENDING participants "
+                       + "(same approval flow as /register — FR-AUTH-03 unchanged). "
+                       + "ACTIVE accounts receive the same JWT pair as /login. "
+                       + "Response.status: PENDING_APPROVAL or AUTHENTICATED.")
+    public ResponseEntity<ApiResponse<GoogleAuthResponse>> googleAuth(
+            @Valid @RequestBody GoogleAuthRequest req) {
+        GoogleAuthResponse res = authService.loginWithGoogle(req.idToken());
+        String message = "PENDING_APPROVAL".equals(res.status())
+                ? "Signed up with Google. Awaiting admin approval."
+                : "Authenticated with Google.";
+        return ResponseEntity.ok(ApiResponse.ok(message, res));
     }
 
     @PostMapping("/logout")

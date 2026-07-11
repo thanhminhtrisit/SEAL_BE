@@ -1,0 +1,1151 @@
+# ============================================================
+# 07 — KỊCH BẢN KIỂM CHỨNG PHẦN CỦA TRÍ
+# Event/Round config + Account/Team approval + Capacity + Mentor planning
+# Nguồn: SEAL_kich_ban_test_phan_TRI.md
+# ============================================================
+# SEED ACCOUNTS (password = Password1):
+#   id=3   coord@seal.local           role=COORDINATOR
+#   id=?   super@seal.local           role=SUPER_COORDINATOR
+#   id=4   judge.internal@seal.local  role=JUDGE
+#   id=7   leader@student.local       role=TEAM_LEADER
+# SEED THAM CHIẾU (xem 03-event-flow.http):
+#   disciplines : id=1 (SE), id=2 (AI), ...
+#   term_plans  : id=1 (SUMMER 2026 / SE), id=2 (SUMMER 2026 / AI), ...
+#   ⚠ Nếu seed DB khác, cần lấy disciplineId + termPlanId bằng GET trước
+# ============================================================
+# THỨ TỰ CHẠY: từ trên xuống trong cùng một run session.
+# Các id chụp qua client.global.set() và truyền cho request sau.
+# ============================================================
+
+### ─── BƯỚC 0: LẤY TOKEN 4 VAI ────────────────────────────────
+
+### [00-coord] Login coord@seal.local
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "coord@seal.local",
+  "password": "Password1"
+}
+
+> {%
+  client.global.set("coordToken", response.body.data.accessToken);
+%}
+
+
+### [00-super] Login super@seal.local
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "super@seal.local",
+  "password": "Password1"
+}
+
+> {%
+  client.global.set("superToken", response.body.data.accessToken);
+%}
+
+
+### [00-judge] Login judge.internal@seal.local
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "judge.internal@seal.local",
+  "password": "Password1"
+}
+
+> {%
+  client.global.set("judgeToken", response.body.data.accessToken);
+%}
+
+
+### [00-leader] Login leader@student.local
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "leader@student.local",
+  "password": "Password1"
+}
+
+> {%
+  client.global.set("leaderToken", response.body.data.accessToken);
+%}
+
+
+###
+# ============================================================
+# NHÓM 1 — Duyệt tài khoản (FR-AUTH-08, BR-GOV-02)
+# ============================================================
+
+### [A1] KỲ VỌNG: 201, tài khoản tạo ở trạng thái PENDING
+# Kiểm DB: users.status='PENDING'
+# Vì sao: Người mới không được vào ngay
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "tri-test-a1@student.local",
+  "password": "Password1",
+  "fullName": "Nguyen Van A1",
+  "phone": "0900000001",
+  "fptStudent": true,
+  "studentId": "FPT-A1-001",
+  "university": "FPT University"
+}
+
+> {%
+  client.global.set("newUserId", response.body.data.userId);
+%}
+
+
+### [A2] KỲ VỌNG: Bị chặn (401/403 — chưa duyệt)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Kiểm: PENDING không đăng nhập được
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "tri-test-a1@student.local",
+  "password": "Password1"
+}
+
+
+### [A3] KỲ VỌNG: 200, có account A1 trong danh sách
+# Coordinator thấy hàng chờ
+GET {{baseUrl}}/api/auth/accounts/pending
+Authorization: Bearer {{coordToken}}
+
+
+### [A4] KỲ VỌNG: 200, status → ACTIVE
+# Kiểm DB: users.status='ACTIVE'
+# Vòng đời tài khoản: duyệt hợp lệ
+POST {{baseUrl}}/api/auth/accounts/{{newUserId}}/approve
+Authorization: Bearer {{coordToken}}
+
+
+### [A5] KỲ VỌNG: 200, đăng nhập được sau khi duyệt
+# Vòng đời tài khoản đúng
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "tri-test-a1@student.local",
+  "password": "Password1"
+}
+
+> {%
+  client.global.set("a1Token", response.body.data.accessToken);
+%}
+
+
+### [A6] KỲ VỌNG: Bị chặn (400 — reason bắt buộc)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Từ chối phải có lý do
+# LƯU Ý: cần 1 account PENDING khác để reject — dùng id giả 999999 sẽ ra 404;
+#   nếu muốn test đúng 400, cần tạo thêm account PENDING rồi reject không có reason.
+#   Đây là case test validation body {} → 400.
+POST {{baseUrl}}/api/auth/accounts/{{newUserId}}/reject
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{}
+
+
+### [A7] KỲ VỌNG: Bị chặn (business rule — không tự duyệt mình)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Coordinator approve chính userId của mình (id=3 theo seed)
+# LƯU Ý: kịch bản ghi "userId = coord" nhưng code dùng @PathVariable — cần điền tay id của coord
+#   Nếu seed coord là id=3: đổi path thành /api/auth/accounts/3/approve
+POST {{baseUrl}}/api/auth/accounts/3/approve
+Authorization: Bearer {{coordToken}}
+
+
+### [A8] KỲ VỌNG: 200, status → REJECTED
+# Kiểm DB: users.status='REJECTED'
+# Nhánh từ chối — cần tạo thêm 1 account PENDING
+# Bước phụ: tạo account pending mới
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "tri-test-a8@student.local",
+  "password": "Password1",
+  "fullName": "Nguyen Van A8",
+  "fptStudent": false
+}
+
+> {%
+  client.global.set("rejectUserId", response.body.data.userId);
+%}
+
+
+### [A8-reject] Từ chối account A8 — KỲ VỌNG: 200, status → REJECTED
+POST {{baseUrl}}/api/auth/accounts/{{rejectUserId}}/reject
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "reason": "Không đủ điều kiện tham gia theo quy định sự kiện"
+}
+
+
+###
+# ============================================================
+# NHÓM 2 — Vòng đời Event (FR-EVT-01, quy trình duyệt 2 cấp)
+# ============================================================
+
+### [E1] KỲ VỌNG: 201, event trạng thái DRAFT
+# Kiểm DB: events.status='DRAFT'
+# Tạo nháp event
+# ⚠ CẦN ĐIỀN TAY: disciplineId=1 + termPlanId=1 (SE / SUMMER 2026) — xác nhận bằng seed
+POST {{baseUrl}}/api/events
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "SEAL Kịch bản Trí — Event E1",
+  "disciplineId": 1,
+  "termPlanId": 1,
+  "eventType": "SUMMER",
+  "description": "Event kiểm chứng kịch bản Trí",
+  "registrationStart": "2026-08-01T08:00:00",
+  "registrationEnd": "2026-08-31T23:59:59"
+}
+
+> {%
+  client.global.set("testEventId", response.body.data.id);
+%}
+
+
+### [E2] KỲ VỌNG: 200, lưu 4 cột capacity
+# Kiểm DB: events.max_teams=3, max_team_size=4, max_participants=12, max_teams_per_mentor=2
+# Override capacity theo event (tầng 2)
+PATCH {{baseUrl}}/api/events/{{testEventId}}
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "maxTeamSize": 4,
+  "maxTeams": 3,
+  "maxParticipants": 12,
+  "maxTeamsPerMentor": 2
+}
+
+
+### [E3] KỲ VỌNG: Bị chặn (event chưa mở)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Kiểm: không tạo team — event đang DRAFT
+# ⚠ CẦN ĐIỀN TAY: categoryId — dùng 1 categoryId hợp lệ (hoặc thử bất kỳ)
+POST {{baseUrl}}/api/teams
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "name": "E3-ShouldFail",
+  "description": "Thử đăng ký khi event chưa OPEN",
+  "eventId": {{testEventId}},
+  "categoryId": 1
+}
+
+
+### E4-SETUP: Thêm round (cần để submit event)
+# KỲ VỌNG: 201 — round tạo thành công
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Sơ loại",
+  "orderNumber": 1,
+  "submissionDeadline": "2026-09-10T23:59:59",
+  "scoringDeadline": "2026-09-15T23:59:59",
+  "promotionTopN": 2,
+  "finalRound": false,
+  "requiresRepo": true,
+  "requiresDemo": false,
+  "requiresSlide": false,
+  "requiresReport": false
+}
+
+> {%
+  client.global.set("round1Id", response.body.data.id);
+%}
+
+
+### E4-SETUP-2: Thêm criteria set (cần để submit) — weight phải tổng = 100
+# KỲ VỌNG: 201
+POST {{baseUrl}}/api/events/{{testEventId}}/criteria-sets
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Bộ tiêu chí vòng sơ loại",
+  "description": "Dùng cho submit setup",
+  "roundId": {{round1Id}},
+  "categoryId": null,
+  "promotionTopN": null,
+  "criteria": [
+    { "name": "Ý tưởng", "maxScore": 10, "weight": 60, "displayOrder": 1 },
+    { "name": "Demo", "maxScore": 10, "weight": 40, "displayOrder": 2 }
+  ]
+}
+
+
+### [E4] KỲ VỌNG: 200, trạng thái → PENDING_APPROVAL
+# Kiểm DB: events.status đổi thành PENDING_APPROVAL
+POST {{baseUrl}}/api/events/{{testEventId}}/submit
+Authorization: Bearer {{coordToken}}
+
+
+### [E5] KỲ VỌNG: Bị chặn (403 — chỉ SUPER_COORDINATOR mới approve được)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Phân quyền duyệt 2 cấp — Coordinator tự approve bị chặn
+POST {{baseUrl}}/api/events/{{testEventId}}/approve
+Authorization: Bearer {{coordToken}}
+
+
+### [E6] KỲ VỌNG: 200 → APPROVED
+# Kiểm DB: events.status='APPROVED'
+# Cấp trên duyệt
+POST {{baseUrl}}/api/events/{{testEventId}}/approve
+Authorization: Bearer {{superToken}}
+
+
+### [E7] KỲ VỌNG: 200 → OPEN (mở đăng ký)
+# Kiểm DB: events.status='OPEN'
+# Mở cổng team
+POST {{baseUrl}}/api/events/{{testEventId}}/open
+Authorization: Bearer {{coordToken}}
+
+
+### [E8-SETUP] Tạo event thứ 2 để test nhánh reject
+POST {{baseUrl}}/api/events
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "SEAL Kịch bản Trí — Event E8 (nhánh reject)",
+  "disciplineId": 1,
+  "termPlanId": 1,
+  "eventType": "SUMMER",
+  "description": "Event để kiểm nhánh từ chối",
+  "registrationStart": "2026-09-01T08:00:00",
+  "registrationEnd": "2026-09-30T23:59:59"
+}
+
+> {%
+  client.global.set("rejectEventId", response.body.data.id);
+%}
+
+
+### E8-SETUP-2: Thêm round + criteria cho event 2
+POST {{baseUrl}}/api/events/{{rejectEventId}}/rounds
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Vòng duy nhất",
+  "orderNumber": 1,
+  "finalRound": true,
+  "requiresRepo": true,
+  "requiresDemo": false,
+  "requiresSlide": false,
+  "requiresReport": false
+}
+
+> {%
+  client.global.set("rejectRoundId", response.body.data.id);
+%}
+
+
+### E8-SETUP-3: Criteria cho event 2
+POST {{baseUrl}}/api/events/{{rejectEventId}}/criteria-sets
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Bộ tiêu chí",
+  "roundId": {{rejectRoundId}},
+  "categoryId": null,
+  "promotionTopN": null,
+  "criteria": [
+    { "name": "Tiêu chí A", "maxScore": 10, "weight": 100, "displayOrder": 1 }
+  ]
+}
+
+
+### E8-SETUP-4: Submit event 2
+POST {{baseUrl}}/api/events/{{rejectEventId}}/submit
+Authorization: Bearer {{coordToken}}
+
+
+### [E8] KỲ VỌNG: 200 → REJECTED, không mở được
+# Kiểm DB: events.status='REJECTED'
+# Nhánh từ chối event bởi Super Coordinator
+POST {{baseUrl}}/api/events/{{rejectEventId}}/reject
+Authorization: Bearer {{superToken}}
+Content-Type: application/json
+
+{
+  "reason": "Event không đáp ứng yêu cầu chất lượng tối thiểu"
+}
+
+
+###
+# ============================================================
+# NHÓM 3 — Cấu hình Round (FR-EVT-02)
+# Dùng testEventId đã OPEN từ E7
+# ============================================================
+
+### [R1] KỲ VỌNG: 201, round tạo với đủ 10 field
+# Kiểm DB: rounds.scoring_deadline có giá trị; requires_repo=1
+# Vòng này bắt buộc nộp repo
+# LƯU Ý: testEventId đã có 1 round từ setup E4 (orderNumber=1)
+#   → dùng orderNumber=3 để tránh trùng
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Sơ loại R1",
+  "orderNumber": 3,
+  "submissionDeadline": "2026-09-10T23:59:59",
+  "scoringDeadline": "2026-09-15T23:59:59",
+  "promotionTopN": 2,
+  "finalRound": false,
+  "requiresRepo": true,
+  "requiresDemo": false,
+  "requiresSlide": false,
+  "requiresReport": false
+}
+
+> {%
+  client.global.set("r1Id", response.body.data.id);
+%}
+
+
+### [R2] KỲ VỌNG: 201, finalRound=true, requires khác vòng 1
+# Kiểm DB: rounds.is_final_round=1, requires_demo=1
+# "Mỗi vòng nộp gì" khác nhau — logic tinh tế
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Chung kết",
+  "orderNumber": 4,
+  "submissionDeadline": "2026-10-01T23:59:59",
+  "scoringDeadline": "2026-10-05T23:59:59",
+  "promotionTopN": null,
+  "finalRound": true,
+  "requiresRepo": false,
+  "requiresDemo": true,
+  "requiresSlide": true,
+  "requiresReport": false
+}
+
+> {%
+  client.global.set("r2Id", response.body.data.id);
+%}
+
+
+### [R3] KỲ VỌNG: 200, scoringDeadline + 4 cờ requires* trả đúng, không null lệch
+# Response khớp cấu hình (đồng nhất FE/BE)
+GET {{baseUrl}}/api/events/{{testEventId}}/rounds
+Authorization: Bearer {{coordToken}}
+
+
+### [R4] KỲ VỌNG: Bị chặn (400 validation)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Ràng buộc dữ liệu — thiếu orderNumber (bắt buộc @NotNull @Min(1))
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Vòng thiếu orderNumber",
+  "finalRound": false,
+  "requiresRepo": true,
+  "requiresDemo": false,
+  "requiresSlide": false,
+  "requiresReport": false
+}
+
+
+###
+# ============================================================
+# NHÓM 4 — Category + Criteria-set theo từng category
+# (điểm cốt lõi: Model A + per-category)
+# ============================================================
+
+### [C1-a] KỲ VỌNG: 201, tạo category "Web"
+# Kiểm DB: categories 2 dòng sau khi tạo đủ
+# 1 event nhiều hạng mục
+POST {{baseUrl}}/api/events/{{testEventId}}/categories
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Web"
+}
+
+> {%
+  client.global.set("catWebId", response.body.data.id);
+%}
+
+
+### [C1-b] KỲ VỌNG: 201, tạo category "AI" (với mentorId nếu có)
+# ⚠ CẦN ĐIỀN TAY: mentorId — lấy từ GET /api/mentors
+#   Nếu không có mentor seed, xóa trường mentorId hoặc đặt null
+POST {{baseUrl}}/api/events/{{testEventId}}/categories
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "AI",
+  "mentorId": null
+}
+
+> {%
+  client.global.set("catAIId", response.body.data.id);
+%}
+
+
+### [C2] KỲ VỌNG: 201, set gắn categoryId=Web, topN=2
+# Kiểm DB: criteria_sets.category_id=<Web>, promotion_top_n=2
+# Trọng số/topN riêng theo hạng mục
+POST {{baseUrl}}/api/events/{{testEventId}}/criteria-sets
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Bộ Web — Vòng sơ loại",
+  "description": "Tiêu chí riêng cho hạng mục Web",
+  "roundId": {{round1Id}},
+  "categoryId": {{catWebId}},
+  "promotionTopN": 2,
+  "criteria": [
+    { "name": "Giao diện", "maxScore": 10, "weight": 40, "displayOrder": 1 },
+    { "name": "Tính năng", "maxScore": 10, "weight": 40, "displayOrder": 2 },
+    { "name": "Hiệu năng", "maxScore": 10, "weight": 20, "displayOrder": 3 }
+  ]
+}
+
+> {%
+  client.global.set("csWebId", response.body.data.id);
+%}
+
+
+### [C3] KỲ VỌNG: 201, nhiều criteria-set/round (mỗi category 1 bộ)
+# Kiểm DB: 2 dòng criteria_sets cùng round_id, khác category_id
+# Chứng minh Model A đáp ứng "khác trọng số, khác topN"
+POST {{baseUrl}}/api/events/{{testEventId}}/criteria-sets
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Bộ AI — Vòng sơ loại",
+  "description": "Tiêu chí riêng cho hạng mục AI — trọng số khác Web",
+  "roundId": {{round1Id}},
+  "categoryId": {{catAIId}},
+  "promotionTopN": 1,
+  "criteria": [
+    { "name": "Độ chính xác mô hình", "maxScore": 10, "weight": 60, "displayOrder": 1 },
+    { "name": "Sáng tạo thuật toán", "maxScore": 10, "weight": 40, "displayOrder": 2 }
+  ]
+}
+
+> {%
+  client.global.set("csAIId", response.body.data.id);
+%}
+
+
+### [C4] KỲ VỌNG: 200, mỗi set trả categoryId, categoryName, promotionTopN
+# Ân đọc đúng bộ theo (round, category)
+GET {{baseUrl}}/api/events/{{testEventId}}/criteria-sets
+Authorization: Bearer {{coordToken}}
+
+
+### [C5] KỲ VỌNG: 201, set round-level (category_id IS NULL)
+# Kiểm DB: category_id IS NULL
+# Category không có bộ riêng → fallback bộ round
+POST {{baseUrl}}/api/events/{{testEventId}}/criteria-sets
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "name": "Bộ chung — không category",
+  "description": "Dùng chung cho các category chưa có bộ riêng",
+  "roundId": {{round1Id}},
+  "categoryId": null,
+  "promotionTopN": null,
+  "criteria": [
+    { "name": "Trình bày", "maxScore": 10, "weight": 50, "displayOrder": 1 },
+    { "name": "Ý tưởng", "maxScore": 10, "weight": 50, "displayOrder": 2 }
+  ]
+}
+
+
+###
+# ============================================================
+# NHÓM 5 — Category resources (bảng mới category_resources)
+# ============================================================
+
+### [RS1] KỲ VỌNG: 201, tạo dòng resource_type='DATASET'
+# Kiểm DB: category_resources có dòng, resource_type='DATASET'
+# Bảng mới hoạt động
+POST {{baseUrl}}/api/events/{{testEventId}}/categories/{{catWebId}}/resources
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "label": "Dataset mẫu Web",
+  "url": "https://drive.example.com/web-dataset.zip",
+  "resourceType": "DATASET"
+}
+
+> {%
+  client.global.set("resourceId", response.body.data.id);
+%}
+
+
+### [RS2] KỲ VỌNG: 200, xem được (isAuthenticated — bất kỳ vai có token)
+# Thí sinh xem tài liệu
+GET {{baseUrl}}/api/events/{{testEventId}}/categories/{{catWebId}}/resources
+Authorization: Bearer {{leaderToken}}
+
+
+### [RS3] KỲ VỌNG: Bị chặn (403 — chỉ COORDINATOR ghi)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Phân quyền đọc/ghi — participant không được POST
+POST {{baseUrl}}/api/events/{{testEventId}}/categories/{{catWebId}}/resources
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "label": "Không được phép",
+  "url": "https://attacker.example.com/malicious.zip",
+  "resourceType": "LINK"
+}
+
+
+### [RS4] KỲ VỌNG: Bị chặn (400 — enum không hợp lệ)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Enum hợp lệ: DATASET/DOC/SAMPLE/LINK/OTHER
+POST {{baseUrl}}/api/events/{{testEventId}}/categories/{{catWebId}}/resources
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "label": "Tài liệu sai enum",
+  "url": "https://drive.example.com/doc.pdf",
+  "resourceType": "XXX"
+}
+
+
+### [RS5] KỲ VỌNG: 200/204, dòng biến mất
+# Kiểm DB: không còn dòng với id={{resourceId}}
+# CRUD đủ
+DELETE {{baseUrl}}/api/events/{{testEventId}}/categories/{{catWebId}}/resources/{{resourceId}}
+Authorization: Bearer {{coordToken}}
+
+
+###
+# ============================================================
+# NHÓM 6 — Capacity 3 tầng + Mentor planning
+# ============================================================
+
+### [CP1] KỲ VỌNG: 200, mentorsNeeded = ceil(3/2) = 2
+# Kiểm: tính từ cột override (event E2 đã set maxTeams=3, maxTeamsPerMentor=2)
+# Lập kế hoạch mentor hợp lý
+# LƯU Ý: activeTeams tính từ team REGISTERED/APPROVED/ACTIVE trong event
+#   Khi mới tạo event chưa có team → activeTeams=0 → mentorsNeeded=0
+#   Để thấy 2: cần 3 team đã tạo trong testEventId (xem nhóm 7 hoặc tạo tay)
+GET {{baseUrl}}/api/events/{{testEventId}}/mentor-planning
+Authorization: Bearer {{coordToken}}
+
+
+### [CP2] KỲ VỌNG: 200, dùng system_configs MAX_TEAMS_PER_MENTOR=5 (tầng 1)
+# Resolver rơi về default toàn cục khi event không đặt maxTeamsPerMentor
+# LƯU Ý: dùng rejectEventId (event không đặt maxTeamsPerMentor) hoặc event seed id=1
+# ⚠ Nếu rejectEventId bị REJECTED, dùng id=1 (seed event) hoặc tạo event mới
+GET {{baseUrl}}/api/events/1/mentor-planning
+Authorization: Bearer {{coordToken}}
+
+
+### [CP3] KỲ VỌNG: Bị chặn (business rule capacity — BR-CAP-01)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Team thứ 4 khi maxTeams=3 → không nhận quá sức chứa
+# PRE-CONDITION: testEventId phải đang OPEN (E7 đã OPEN) + đã có 3 team active
+# ⚠ CẦN SETUP TRƯỚC: tạo 3 team vào testEventId (xem nhóm 7 T1)
+#   Sau khi có đủ 3 team, chạy request này để kiểm BR-CAP-01
+# ⚠ CẦN ĐIỀN TAY: categoryId — dùng catWebId
+POST {{baseUrl}}/api/teams
+Authorization: Bearer {{a1Token}}
+Content-Type: application/json
+
+{
+  "name": "Team Vượt Ngưỡng CP3",
+  "description": "Thử đăng ký team thứ 4 khi maxTeams=3",
+  "eventId": {{testEventId}},
+  "categoryId": {{catWebId}}
+}
+
+
+###
+# ============================================================
+# NHÓM 7 — Đăng ký & duyệt Team (FR-TEAM-01, BR-TEAM-01)
+# PRE-CONDITION: testEventId đang OPEN (sau E7)
+# ============================================================
+
+### [T1] KỲ VỌNG: 201, team REGISTERED
+# Kiểm DB: teams.status='REGISTERED'
+# Đăng ký vào hạng mục Web
+POST {{baseUrl}}/api/teams
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "name": "Team Trí T1",
+  "description": "Team đăng ký kịch bản kiểm chứng",
+  "eventId": {{testEventId}},
+  "categoryId": {{catWebId}}
+}
+
+> {%
+  client.global.set("teamT1Id", response.body.data.id);
+%}
+
+
+### [T2-invite-1] Mời thành viên 1
+# Setup cho case T3 — mời đủ người vượt maxTeamSize=4
+POST {{baseUrl}}/api/teams/{{teamT1Id}}/invitations
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "email": "tri-test-a1@student.local"
+}
+
+> {%
+  client.global.set("inviteId1", response.body.data.id);
+%}
+
+
+### [T2-accept-1] A1 chấp nhận lời mời
+POST {{baseUrl}}/api/teams/invitations/{{inviteId1}}/accept
+Authorization: Bearer {{a1Token}}
+
+
+### [T2-invite-2] Mời thành viên 2
+# ⚠ CẦN ĐIỀN TAY: email thành viên 2 (phải là account ACTIVE đã seed/đăng ký)
+#   Ví dụ: member1@student.local (id=8)
+POST {{baseUrl}}/api/teams/{{teamT1Id}}/invitations
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "email": "member1@student.local"
+}
+
+> {%
+  client.global.set("inviteId2", response.body.data.id);
+%}
+
+
+### [T2-accept-2] member1 chấp nhận
+# ⚠ CẦN ĐIỀN TAY: token của member1@student.local
+#   Lấy bằng [00-member1] login request bên dưới
+POST {{baseUrl}}/api/teams/invitations/{{inviteId2}}/accept
+Authorization: Bearer {{member1Token}}
+
+
+### [T2-invite-3] Mời thành viên 3 — để có 4 người total (leader + 3 = 4 = maxTeamSize)
+# ⚠ CẦN ĐIỀN TAY: email thành viên 3 (seed member2@student.local hoặc tạo thêm)
+POST {{baseUrl}}/api/teams/{{teamT1Id}}/invitations
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "email": "member2@student.local"
+}
+
+> {%
+  client.global.set("inviteId3", response.body.data.id);
+%}
+
+
+### [T2-accept-3] member2 chấp nhận
+# ⚠ CẦN ĐIỀN TAY: token của member2@student.local
+POST {{baseUrl}}/api/teams/invitations/{{inviteId3}}/accept
+Authorization: Bearer {{member2Token}}
+
+
+### [T2-invite-4-OVER] Mời thành viên thứ 5 (vượt maxTeamSize=4)
+# ĐÂY LÀ CASE ÂM — sẽ bị chặn BR-CAP-03 (nhóm đã đủ sĩ số)
+# Dùng cho setup chứng minh — expect 4xx
+POST {{baseUrl}}/api/teams/{{teamT1Id}}/invitations
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "email": "tri-test-a8@student.local"
+}
+
+
+### [T3] KỲ VỌNG: Bị chặn (BR-TEAM-01 size check)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Kiểm: team KHÔNG APPROVED — duyệt phải kiểm sĩ số
+# LƯU Ý: kịch bản ghi "team > maxTeamSize" nhưng với maxTeamSize=4 và team T1 có 4 người,
+#   cần team có 5 người để vượt max. Nếu team hiện có đúng 4 (= max, không > max),
+#   case này sẽ pass về BR-CAP-04 (thiếu min) thay vì BR-TEAM-01.
+#   Với event đặt maxTeamSize=4: team 4 người hợp lệ → phải có thêm người mới vi phạm.
+#   Trong kịch bản Trí: T3 test "team > maxTeamSize" → cần tạo team riêng đã có 5+ người.
+#   Nếu DB chưa setup case này, có thể test bằng team có 0-2 người (vi phạm BR-CAP-04 min).
+POST {{baseUrl}}/api/teams/{{teamT1Id}}/review
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "approved": true,
+  "reason": ""
+}
+
+
+### [T4] KỲ VỌNG: 200 → APPROVED, ghi audit
+# Kiểm DB: teams.status='APPROVED', có audit_logs
+# Nhánh duyệt + truy vết
+# LƯU Ý: team T1 cần có [min, max] active members để approve thành công.
+#   Với effectiveMin=3, effectiveMax=4: team phải có 3–4 người active.
+#   Nếu T3 đã approve thất bại, T4 dùng cùng team sau khi đã đủ điều kiện.
+POST {{baseUrl}}/api/teams/{{teamT1Id}}/review
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "approved": true,
+  "reason": ""
+}
+
+
+### [T5] KỲ VỌNG: 200 → REJECTED
+# Kiểm DB: teams.status='REJECTED'
+# Nhánh từ chối — cần 1 team REGISTERED khác
+# SETUP: Tạo team thứ 2 để reject
+# ⚠ Cần token của leader khác (hoặc a1Token nếu a1 chưa có team trong event)
+# LƯU Ý: a1Token đã join teamT1 → không tạo được team mới trong cùng event
+#   → cần tài khoản chưa có team. Dùng tri-test-a8 (đã bị REJECTED account) hoặc
+#   tạo thêm account PENDING → approve → tạo team
+POST {{baseUrl}}/api/teams/{{teamT1Id}}/review
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "approved": false,
+  "reason": "Nhóm không đạt yêu cầu về số lượng thành viên tối thiểu"
+}
+
+
+###
+# ============================================================
+# NHÓM 8 — Round lifecycle (FIX P0 #1 — FR-EVT-02 / BR-EVT-02 / BR-SCR-05)
+# PRE-CONDITION: testEventId đang OPEN (E7), round1Id (order=1) + r1Id (order=3)
+#   + r2Id (order=4, final) đã tạo. Máy trạng thái:
+#   DRAFT → OPEN_FOR_SUBMISSION → SUBMISSION_CLOSED → SCORING_OPEN → SCORING_LOCKED → COMPLETED
+# ============================================================
+
+### [RL1] KỲ VỌNG: Bị chặn (BR-EVT-02 — round order=3 mở khi round order=1 chưa lock)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{r1Id}}/open-submission
+Authorization: Bearer {{coordToken}}
+
+
+### [RL2] KỲ VỌNG: 200 → OPEN_FOR_SUBMISSION (round đầu tiên, order=1)
+# Kiểm DB: rounds.status='OPEN_FOR_SUBMISSION'; audit_logs có ROUND_SUBMISSION_OPENED
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{round1Id}}/open-submission
+Authorization: Bearer {{coordToken}}
+
+
+### [RL3] KỲ VỌNG: Bị chặn (sai thứ tự — DRAFT không nhảy thẳng SCORING)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{round1Id}}/open-scoring
+Authorization: Bearer {{coordToken}}
+
+
+### [RL4] KỲ VỌNG: 200 → SUBMISSION_CLOSED
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{round1Id}}/close-submission
+Authorization: Bearer {{coordToken}}
+
+
+### [RL5] KỲ VỌNG: 200 → SCORING_OPEN
+# Từ đây judge mới được chấm — chấm SAU khi đóng nộp bài (chống chấm bản cũ)
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{round1Id}}/open-scoring
+Authorization: Bearer {{coordToken}}
+
+
+### [RL6] KỲ VỌNG: 200 → SCORING_LOCKED; audit ROUND_LOCKED
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{round1Id}}/lock-scoring
+Authorization: Bearer {{coordToken}}
+
+
+### [RL7] KỲ VỌNG: Bị chặn (400 — unlock không có reason)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Trap question: "khóa rồi sửa được không?" → chỉ qua unlock CÓ LÝ DO + audit
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{round1Id}}/unlock-scoring
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{}
+
+
+### [RL8] KỲ VỌNG: 200 → SCORING_OPEN lại; audit ROUND_UNLOCKED kèm reason
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{round1Id}}/unlock-scoring
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "reason": "Judge nhập nhầm điểm đội T1 — mở lại để sửa theo biên bản"
+}
+
+
+### [RL9] Khóa lại — KỲ VỌNG: 200 → SCORING_LOCKED
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{round1Id}}/lock-scoring
+Authorization: Bearer {{coordToken}}
+
+
+### [RL9-b] Complete round 1 — KỲ VỌNG: 200 → COMPLETED
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{round1Id}}/complete
+Authorization: Bearer {{coordToken}}
+
+
+### [RL10] KỲ VỌNG: 200 — GIỜ round order=3 mở được (round 1 đã COMPLETED)
+# Đối chứng với RL1: BR-EVT-02 hoạt động đúng 2 chiều
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{r1Id}}/open-submission
+Authorization: Bearer {{coordToken}}
+
+
+### [RL11] KỲ VỌNG: Bị chặn (403 — super KHÔNG phải owner coordinator)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+POST {{baseUrl}}/api/events/{{testEventId}}/rounds/{{r1Id}}/close-submission
+Authorization: Bearer {{superToken}}
+
+
+###
+# ============================================================
+# NHÓM 9 — Kiểm chứng FIX P0 #10 (budget) + #2/#3 (submission)
+# ============================================================
+
+### [BG1] KỲ VỌNG: 200 nhưng status KHÔNG đổi (vẫn DRAFT) — client không tự duyệt budget được
+# Kiểm response: data.status='DRAFT' dù request gửi APPROVED
+PATCH {{baseUrl}}/api/events/{{testEventId}}/budget
+Authorization: Bearer {{coordToken}}
+Content-Type: application/json
+
+{
+  "status": "APPROVED"
+}
+
+
+### [SB1] KỲ VỌNG: 201 — team APPROVED (T4) nộp bài được, leader không bị 403
+# PRE-CONDITION: teamT1Id đã APPROVED (T4) + round r1Id đang OPEN_FOR_SUBMISSION (RL10)
+# Kiểm cả fix #2 (APPROVED được nộp) lẫn #3 (leader thật qua validateTeamLeader trong service)
+POST {{baseUrl}}/api/submissions
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "teamId": {{teamT1Id}},
+  "roundId": {{r1Id}},
+  "repoUrl": "https://github.com/seal-team-t1/project",
+  "changeNote": "Bản nộp kiểm chứng fix P0"
+}
+
+
+### [SB2] KỲ VỌNG: Bị chặn (403 — member thường không phải leader)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+# Chứng minh hạ @PreAuthorize KHÔNG mở lỗ hổng: validateTeamLeader trong service chặn
+POST {{baseUrl}}/api/submissions
+Authorization: Bearer {{member1Token}}
+Content-Type: application/json
+
+{
+  "teamId": {{teamT1Id}},
+  "roundId": {{r1Id}},
+  "repoUrl": "https://github.com/seal-team-t1/fake",
+  "changeNote": "Member thường thử nộp — phải bị chặn"
+}
+
+
+###
+# ============================================================
+# NHÓM 10 — Auto-approve account (system_configs.AUTO_APPROVE_ACCOUNTS)
+# Flag mặc định 'false' (giữ hành vi duyệt tay gốc). Bật/tắt bằng SQL
+# (Admin config API là scope-cut, xem WBS):
+#   UPDATE system_configs SET config_value='true'  WHERE config_key='AUTO_APPROVE_ACCOUNTS';
+#   UPDATE system_configs SET config_value='false' WHERE config_key='AUTO_APPROVE_ACCOUNTS';
+# DB cũ chưa có row thì chạy:
+#   INSERT INTO system_configs (config_key, config_value, description, updated_by)
+#   VALUES ('AUTO_APPROVE_ACCOUNTS','false','Auto-activate valid registrations',1);
+# ============================================================
+
+### [AA1] Flag=false — KỲ VỌNG: 201, data.status='PENDING' (hành vi gốc, so sánh với A1)
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "aa1-flagoff@student.local",
+  "password": "Password1",
+  "fullName": "Auto Approve Off",
+  "fptStudent": true,
+  "studentId": "FPT-AA-001"
+}
+
+
+### [AA2] Bật flag bằng SQL ở trên rồi chạy — KỲ VỌNG: 201, data.status='ACTIVE',
+# message "auto-approved"; audit_logs có ACCOUNT_AUTO_APPROVED
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "aa2-flagon@student.local",
+  "password": "Password1",
+  "fullName": "Auto Approve On",
+  "fptStudent": true,
+  "studentId": "FPT-AA-002"
+}
+
+
+### [AA3] Login NGAY sau AA2 không cần ai duyệt — KỲ VỌNG: 200 + tokens
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "aa2-flagon@student.local",
+  "password": "Password1"
+}
+
+
+### [AA4] Đăng ký thiếu studentId khi flag=true — KỲ VỌNG: 400 BR-USR-03
+# Chứng minh: auto-approve KHÔNG bỏ qua validation — chỉ bỏ bước duyệt tay
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "aa4-invalid@student.local",
+  "password": "Password1",
+  "fullName": "Invalid Info",
+  "fptStudent": true
+}
+
+
+###
+# ============================================================
+# NHÓM 11 — Team realism package (BR-TEAM-08 roster lock + vòng đời team)
+# PRE-CONDITION: teamT1Id tồn tại (T1), event OPEN, trong registration window
+# ============================================================
+
+### [TR1] Đổi tên team khi REGISTERED — KỲ VỌNG: 200
+PATCH {{baseUrl}}/api/teams/{{teamT1Id}}
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "name": "Team Trí T1 Renamed",
+  "description": "Đổi tên trước khi duyệt"
+}
+
+
+### [TR2] Member thường thu hồi lời mời — KỲ VỌNG: 403 (chỉ leader)
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+DELETE {{baseUrl}}/api/teams/{{teamT1Id}}/invitations/999
+Authorization: Bearer {{member1Token}}
+
+
+### [TR3] Transfer leadership cho member — KỲ VỌNG: 200, leader mới trong response
+# ⚠ CẦN ĐIỀN TAY: id của member1 (xem GET team detail)
+PUT {{baseUrl}}/api/teams/{{teamT1Id}}/leader
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "newLeaderId": 8
+}
+
+
+### [TR4] Sau khi team APPROVED (chạy T4 trước): mời thêm người — KỲ VỌNG: 4xx BR-TEAM-08
+# ĐÂY LÀ CASE ÂM — roster đóng băng sau duyệt, size check lúc duyệt không bị vô hiệu
+POST {{baseUrl}}/api/teams/{{teamT1Id}}/invitations
+Authorization: Bearer {{leaderToken}}
+Content-Type: application/json
+
+{
+  "email": "tri-test-a8@student.local"
+}
+
+
+### [TR5] Member rời team đã APPROVED — KỲ VỌNG: 4xx BR-TEAM-08
+# ĐÂY LÀ CASE ÂM: phải nhận status lỗi (4xx), nếu 2xx là BUG
+DELETE {{baseUrl}}/api/teams/{{teamT1Id}}/members/8
+Authorization: Bearer {{member1Token}}
+
+
+### [TR6] Reject 1 team khác rồi resubmit — KỲ VỌNG: 200, REJECTED → REGISTERED, reason bị xóa
+# PRE: tạo team T2, coordinator reject với reason, rồi leader T2 gọi:
+POST {{baseUrl}}/api/teams/{{team2Id}}/resubmit
+Authorization: Bearer {{a1Token}}
+
+
+### [TR7] Thành viên team REJECTED tạo team mới — KỲ VỌNG: 201 (hết dead-lock)
+# Trước fix: BR-TEAM-02 chặn vĩnh viễn dù team cũ đã bị reject
+POST {{baseUrl}}/api/teams
+Authorization: Bearer {{a1Token}}
+Content-Type: application/json
+
+{
+  "name": "Team Tái Sinh",
+  "description": "Tạo mới sau khi team cũ bị reject",
+  "eventId": {{testEventId}},
+  "categoryId": {{catWebId}}
+}
+
+
+### [TR8] Withdraw team khi event còn OPEN — KỲ VỌNG: 200 → WITHDRAWN
+# Dùng team còn REGISTERED (không phải team đã APPROVED đang demo)
+POST {{baseUrl}}/api/teams/{{team2Id}}/withdraw
+Authorization: Bearer {{a1Token}}
+
+
+###
+# ============================================================
+# HELPER: Login thêm cho các token phụ cần điền tay
+# ============================================================
+
+### [00-member1] Login member1@student.local (nếu cần)
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "member1@student.local",
+  "password": "Password1"
+}
+
+> {%
+  client.global.set("member1Token", response.body.data.accessToken);
+%}
+
+
+### [00-member2] Login member2@student.local (nếu cần)
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "member2@student.local",
+  "password": "Password1"
+}
+
+> {%
+  client.global.set("member2Token", response.body.data.accessToken);
+%}

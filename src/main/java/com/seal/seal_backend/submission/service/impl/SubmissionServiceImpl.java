@@ -207,8 +207,10 @@ public class SubmissionServiceImpl implements SubmissionService {
     }
 
     private void validateTeamCanSubmit(Team team) {
-        if (team.getStatus() != TeamStatus.ACTIVE) {
-            throw new BusinessRuleException("BR-SUB-04", "Only active teams can submit projects");
+        // BR-SUB-04: approval flow sets APPROVED (reviewTeam); ACTIVE is also accepted for
+        // consistency with TeamQueryAdapter — both mean "eligible team".
+        if (team.getStatus() != TeamStatus.ACTIVE && team.getStatus() != TeamStatus.APPROVED) {
+            throw new BusinessRuleException("BR-SUB-04", "Only approved/active teams can submit projects");
         }
     }
 

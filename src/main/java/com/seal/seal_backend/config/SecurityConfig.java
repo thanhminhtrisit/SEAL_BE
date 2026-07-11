@@ -36,6 +36,7 @@ public class SecurityConfig {
     private static final String[] PUBLIC_PATHS = {
             "/api/auth/register",
             "/api/auth/login",
+            "/api/auth/google",    // GIS ID-token sign-in — token is verified inside GoogleTokenVerifier
             "/api/auth/ping",
             "/api/*/ping",         // allow all module ping endpoints during parallel dev
             "/swagger-ui/**",

@@ -110,6 +110,73 @@ public class EventController {
         return ApiResponse.ok(eventService.updateRound(eventId, roundId, req));
     }
 
+    // ─── Round lifecycle (FR-EVT-02 / BR-EVT-02) ─────────────────────────────
+    // DRAFT → OPEN_FOR_SUBMISSION → SUBMISSION_CLOSED → SCORING_OPEN → SCORING_LOCKED → COMPLETED
+
+    @PostMapping("/{eventId}/rounds/{roundId}/open-submission")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Open round for submission (DRAFT → OPEN_FOR_SUBMISSION)",
+               description = "BR-EVT-02: every earlier round must be SCORING_LOCKED or COMPLETED; event must be OPEN or IN_PROGRESS. Owner coordinator only.")
+    public ApiResponse<RoundResponse> openRoundSubmission(
+            @PathVariable Long eventId, @PathVariable Long roundId,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Round opened for submission.",
+                eventService.openRoundSubmission(eventId, roundId, user.getId()));
+    }
+
+    @PostMapping("/{eventId}/rounds/{roundId}/close-submission")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Close submissions (OPEN_FOR_SUBMISSION → SUBMISSION_CLOSED)")
+    public ApiResponse<RoundResponse> closeRoundSubmission(
+            @PathVariable Long eventId, @PathVariable Long roundId,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Round submissions closed.",
+                eventService.closeRoundSubmission(eventId, roundId, user.getId()));
+    }
+
+    @PostMapping("/{eventId}/rounds/{roundId}/open-scoring")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Open scoring (SUBMISSION_CLOSED → SCORING_OPEN)",
+               description = "Judges can only score after submissions are closed — prevents scoring a version that is later resubmitted.")
+    public ApiResponse<RoundResponse> openRoundScoring(
+            @PathVariable Long eventId, @PathVariable Long roundId,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Round scoring opened.",
+                eventService.openRoundScoring(eventId, roundId, user.getId()));
+    }
+
+    @PostMapping("/{eventId}/rounds/{roundId}/lock-scoring")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Lock scoring (SCORING_OPEN → SCORING_LOCKED) — UC-08 / BR-SCR-05",
+               description = "After lock, scores are immutable; ranking is computed on locked scores.")
+    public ApiResponse<RoundResponse> lockRoundScoring(
+            @PathVariable Long eventId, @PathVariable Long roundId,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Round scoring locked.",
+                eventService.lockRoundScoring(eventId, roundId, user.getId()));
+    }
+
+    @PostMapping("/{eventId}/rounds/{roundId}/unlock-scoring")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Unlock scoring (SCORING_LOCKED → SCORING_OPEN) — audited, reason mandatory (BR-SCR-05)")
+    public ApiResponse<RoundResponse> unlockRoundScoring(
+            @PathVariable Long eventId, @PathVariable Long roundId,
+            @Valid @RequestBody UnlockRoundRequest req,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Round scoring unlocked.",
+                eventService.unlockRoundScoring(eventId, roundId, user.getId(), req.reason()));
+    }
+
+    @PostMapping("/{eventId}/rounds/{roundId}/complete")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Complete round (SCORING_LOCKED → COMPLETED)")
+    public ApiResponse<RoundResponse> completeRound(
+            @PathVariable Long eventId, @PathVariable Long roundId,
+            @CurrentUser UserPrincipal user) {
+        return ApiResponse.ok("Round completed.",
+                eventService.completeRound(eventId, roundId, user.getId()));
+    }
+
     // ─── Criteria Sets ────────────────────────────────────────────────────────
 
     @PostMapping("/{eventId}/criteria-sets")

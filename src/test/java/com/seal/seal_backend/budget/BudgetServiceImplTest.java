@@ -262,7 +262,9 @@ class BudgetServiceImplTest {
         }
 
         @Test
-        void patchStatus_updatesSuccessfully() {
+        void patchStatus_isIgnored_clientCannotSelfApprove() {
+            // FR-BGT-05: budget status must not be settable via PATCH — a coordinator
+            // could otherwise self-approve their own budget.
             event.setStatus(EventStatus.DRAFT);
             when(eventRepository.findById(10L)).thenReturn(Optional.of(event));
             when(eventBudgetRepository.findByEventId(10L)).thenReturn(Optional.of(budget));
@@ -270,9 +272,9 @@ class BudgetServiceImplTest {
             when(budgetItemRepository.findByBudgetId(1L)).thenReturn(List.of());
 
             BudgetResponse res = budgetService.patchBudget(10L,
-                    new UpdateBudgetRequest(null, BudgetStatus.PENDING_APPROVAL));
+                    new UpdateBudgetRequest(null, BudgetStatus.APPROVED));
 
-            assertThat(res.status()).isEqualTo("PENDING_APPROVAL");
+            assertThat(res.status()).isEqualTo("DRAFT");
         }
 
         @Test

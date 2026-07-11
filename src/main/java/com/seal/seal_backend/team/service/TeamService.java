@@ -31,6 +31,21 @@ public interface TeamService {
     // FR-TEAM-05: coordinator approve/reject (BR-TEAM-01: size check on approve)
     TeamResponse reviewTeam(Long teamId, ApproveTeamRequest req, Long coordinatorId, String ip);
 
-    // FR-TEAM-07: remove member (leader or self); warns but allows if size drops below min
+    // FR-TEAM-07: remove member (leader or self); roster locked once team is APPROVED/ACTIVE
     TeamResponse removeMember(Long teamId, Long targetUserId, Long requesterId);
+
+    // FR-TEAM-06: leader edits name/description before approval
+    TeamResponse updateTeam(Long teamId, UpdateTeamRequest req, Long requesterId);
+
+    // Leader resubmits a REJECTED team for review (REJECTED → REGISTERED, within reg window)
+    TeamResponse resubmitTeam(Long teamId, Long requesterId);
+
+    // BR-TEAM-05: current leader transfers leadership to an ACTIVE member
+    TeamResponse transferLeadership(Long teamId, TransferLeadershipRequest req, Long requesterId);
+
+    // Leader withdraws the team before the event starts (→ WITHDRAWN, members are freed)
+    TeamResponse withdrawTeam(Long teamId, Long requesterId);
+
+    // Leader revokes a PENDING invitation (→ CANCELLED)
+    InvitationResponse revokeInvitation(Long teamId, Long invitationId, Long requesterId);
 }

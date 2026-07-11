@@ -66,7 +66,11 @@ public class SubmissionController {
         );
     }
 
-    @PreAuthorize("hasRole('TEAM_LEADER')")
+    // Coarse gate only: the real "is the active LEADER of this team" check is
+    // validateTeamLeader(...) in the service (team_members.member_role = LEADER).
+    // users.primary_role is TEAM_MEMBER for every registrant, so hasRole('TEAM_LEADER')
+    // would 403 every legitimate leader.
+    @PreAuthorize("hasAnyRole('TEAM_LEADER', 'TEAM_MEMBER')")
     @PostMapping
     public ResponseEntity<ApiResponse<SubmissionDetailResponseDTO>> createSubmission(
             @Valid @RequestBody CreateSubmissionRequestDTO request,

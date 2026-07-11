@@ -4,8 +4,11 @@ import com.seal.seal_backend.auth.dto.request.CreateGuestJudgeRequest;
 import com.seal.seal_backend.auth.dto.request.LoginRequest;
 import com.seal.seal_backend.auth.dto.request.RegisterRequest;
 import com.seal.seal_backend.auth.dto.response.AuthResponse;
+import com.seal.seal_backend.auth.dto.response.GoogleAuthResponse;
 import com.seal.seal_backend.auth.dto.response.GuestJudgeResponse;
 import com.seal.seal_backend.auth.dto.response.PendingAccountResponse;
+import com.seal.seal_backend.auth.dto.response.RegisterResponse;
+import com.seal.seal_backend.auth.security.GoogleTokenVerifier;
 import com.seal.seal_backend.auth.security.JwtTokenProvider;
 import com.seal.seal_backend.auth.security.UserPrincipal;
 import com.seal.seal_backend.auth.service.impl.AuthServiceImpl;
@@ -16,10 +19,12 @@ import com.seal.seal_backend.auth.dto.response.MeResponse;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
 import com.seal.seal_backend.common.exception.ResourceNotFoundException;
 import com.seal.seal_backend.domain.entity.Role;
+import com.seal.seal_backend.domain.entity.SystemConfig;
 import com.seal.seal_backend.domain.entity.User;
 import com.seal.seal_backend.domain.enums.AccountType;
 import com.seal.seal_backend.domain.enums.UserStatus;
 import com.seal.seal_backend.domain.repository.RoleRepository;
+import com.seal.seal_backend.domain.repository.SystemConfigRepository;
 import com.seal.seal_backend.domain.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -49,6 +54,8 @@ class AuthServiceImplTest {
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtTokenProvider jwtTokenProvider;
     @Mock AuditPublisher auditPublisher;
+    @Mock GoogleTokenVerifier googleTokenVerifier;
+    @Mock SystemConfigRepository systemConfigRepository;
 
     @InjectMocks AuthServiceImpl authService;
 
@@ -120,9 +127,10 @@ class AuthServiceImplTest {
             User saved = savedUser(42L, UserStatus.PENDING);
             when(userRepository.save(any())).thenReturn(saved);
 
-            Long id = authService.register(fptReq("fpt@student.local", "Password1"));
+            RegisterResponse res = authService.register(fptReq("fpt@student.local", "Password1"));
 
-            assertThat(id).isEqualTo(42L);
+            assertThat(res.userId()).isEqualTo(42L);
+            assertThat(res.status()).isEqualTo("PENDING");
             verify(userRepository).save(argThat(u ->
                     u.getStatus() == UserStatus.PENDING && u.getPrimaryRole() == teamMemberRole));
         }
@@ -136,9 +144,9 @@ class AuthServiceImplTest {
 
             RegisterRequest req = new RegisterRequest(
                     "ext@uni.edu", "Password1", "Ext User", null, false, "EXT001", "Partner Uni");
-            Long id = authService.register(req);
+            RegisterResponse res = authService.register(req);
 
-            assertThat(id).isEqualTo(99L);
+            assertThat(res.userId()).isEqualTo(99L);
         }
 
         // ── email REJECTED → reactivate ───────────────────────────────────
@@ -151,9 +159,10 @@ class AuthServiceImplTest {
             when(passwordEncoder.encode(any())).thenReturn("$2a$new$hash");
             when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-            Long id = authService.register(fptReq("rej@x.com", "Password1"));
+            RegisterResponse res = authService.register(fptReq("rej@x.com", "Password1"));
 
-            assertThat(id).isEqualTo(77L);
+            assertThat(res.userId()).isEqualTo(77L);
+            assertThat(res.status()).isEqualTo("PENDING");
             assertThat(rejected.getStatus()).isEqualTo(UserStatus.PENDING);
             assertThat(rejected.getApprovedBy()).isNull();
             assertThat(rejected.getApprovedAt()).isNull();
@@ -286,6 +295,179 @@ class AuthServiceImplTest {
             assertThat(resp.accessToken()).isEqualTo("access-tok");
             assertThat(resp.refreshToken()).isEqualTo("refresh-tok");
             verify(userRepository).save(argThat(u -> u.getLastLoginAt() != null));
+        }
+    }
+
+    // ─────────────────── AUTO-APPROVE (AUTO_APPROVE_ACCOUNTS) ─────────────
+
+    @Nested
+    class AutoApprove {
+
+        private void stubFlagOn() {
+            SystemConfig cfg = new SystemConfig();
+            cfg.setConfigKey("AUTO_APPROVE_ACCOUNTS");
+            cfg.setConfigValue("true");
+            when(systemConfigRepository.findByConfigKey("AUTO_APPROVE_ACCOUNTS"))
+                    .thenReturn(Optional.of(cfg));
+        }
+
+        @Test
+        void flagOn_newValidRegistration_isActivatedImmediately_andAudited() {
+            when(userRepository.findByEmail(any())).thenReturn(Optional.empty());
+            when(roleRepository.findByCode("TEAM_MEMBER")).thenReturn(Optional.of(teamMemberRole));
+            when(passwordEncoder.encode(any())).thenReturn("$2a$10$hashed");
+            stubFlagOn();
+            when(userRepository.save(any())).thenAnswer(inv -> {
+                User u = inv.getArgument(0);
+                u.setId(43L);
+                return u;
+            });
+
+            RegisterResponse res = authService.register(fptReq("auto@student.local", "Password1"));
+
+            assertThat(res.status()).isEqualTo("ACTIVE");
+            assertThat(res.userId()).isEqualTo(43L);
+            verify(userRepository).save(argThat(u ->
+                    u.getStatus() == UserStatus.ACTIVE
+                    && u.getApprovedAt() != null
+                    && u.getApprovedBy() == null));
+            verify(auditPublisher).log(any(), eq(AuditAction.ACCOUNT_AUTO_APPROVED),
+                    eq("USER"), eq(43L), isNull(), any(),
+                    contains("AUTO_APPROVE_ACCOUNTS"), isNull());
+        }
+
+        @Test
+        void flagOn_rejectedReRegistration_staysPending_humanMustApprove() {
+            User rejected = userWithStatus("rej2@x.com", UserStatus.REJECTED);
+            rejected.setId(78L);
+            when(userRepository.findByEmail("rej2@x.com")).thenReturn(Optional.of(rejected));
+            when(passwordEncoder.encode(any())).thenReturn("$2a$new$hash");
+            when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            RegisterResponse res = authService.register(fptReq("rej2@x.com", "Password1"));
+
+            assertThat(res.status()).isEqualTo("PENDING");
+            // Reactivation path must not even consult the flag
+            verify(systemConfigRepository, never()).findByConfigKey(any());
+        }
+
+        @Test
+        void flagOn_newGoogleUser_isActivated_andReceivesTokens() {
+            when(googleTokenVerifier.verify("valid-token"))
+                    .thenReturn(new GoogleTokenVerifier.GoogleUser("gnew@gmail.com", "G New", true));
+            when(userRepository.findByEmail("gnew@gmail.com")).thenReturn(Optional.empty());
+            when(roleRepository.findByCode("TEAM_MEMBER")).thenReturn(Optional.of(teamMemberRole));
+            when(passwordEncoder.encode(any())).thenReturn("$2a$10$random");
+            stubFlagOn();
+            when(userRepository.save(any())).thenAnswer(inv -> {
+                User u = inv.getArgument(0);
+                if (u.getId() == null) u.setId(56L);
+                return u;
+            });
+            when(jwtTokenProvider.generateAccessToken(any(UserPrincipal.class))).thenReturn("auto-access");
+            when(jwtTokenProvider.generateRefreshToken(any(UserPrincipal.class))).thenReturn("auto-refresh");
+
+            GoogleAuthResponse res = authService.loginWithGoogle("valid-token");
+
+            assertThat(res.status()).isEqualTo("AUTHENTICATED");
+            assertThat(res.userId()).isEqualTo(56L);
+            assertThat(res.accessToken()).isEqualTo("auto-access");
+            verify(auditPublisher).log(any(), eq(AuditAction.ACCOUNT_AUTO_APPROVED),
+                    eq("USER"), eq(56L), isNull(), any(),
+                    contains("Google-verified"), isNull());
+        }
+    }
+
+    // ─────────────────────── GOOGLE LOGIN ─────────────────────────────────
+
+    @Nested
+    class GoogleLogin {
+
+        private void stubGoogle(String email) {
+            when(googleTokenVerifier.verify("valid-token"))
+                    .thenReturn(new GoogleTokenVerifier.GoogleUser(email, "Google User", true));
+        }
+
+        @Test
+        void invalidToken_propagates_BR_AUTH_09() {
+            when(googleTokenVerifier.verify("bad-token"))
+                    .thenThrow(new BusinessRuleException("BR-AUTH-09", "Invalid or expired Google token."));
+
+            assertThatThrownBy(() -> authService.loginWithGoogle("bad-token"))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-AUTH-09");
+        }
+
+        @Test
+        void unverifiedEmail_throws_BR_AUTH_09() {
+            when(googleTokenVerifier.verify("valid-token"))
+                    .thenReturn(new GoogleTokenVerifier.GoogleUser("g@x.com", "G", false));
+
+            assertThatThrownBy(() -> authService.loginWithGoogle("valid-token"))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-AUTH-09");
+        }
+
+        @Test
+        void newEmail_createsPendingTeamMember_noTokens() {
+            stubGoogle("new@gmail.com");
+            when(userRepository.findByEmail("new@gmail.com")).thenReturn(Optional.empty());
+            when(roleRepository.findByCode("TEAM_MEMBER")).thenReturn(Optional.of(teamMemberRole));
+            when(passwordEncoder.encode(any())).thenReturn("$2a$10$random");
+            when(userRepository.save(any())).thenReturn(savedUser(55L, UserStatus.PENDING));
+
+            GoogleAuthResponse res = authService.loginWithGoogle("valid-token");
+
+            assertThat(res.status()).isEqualTo("PENDING_APPROVAL");
+            assertThat(res.userId()).isEqualTo(55L);
+            assertThat(res.accessToken()).isNull();
+            verify(userRepository).save(argThat(u ->
+                    u.getStatus() == UserStatus.PENDING
+                    && u.getPrimaryRole() == teamMemberRole
+                    && u.getAccountType() == AccountType.PARTICIPANT));
+            verify(jwtTokenProvider, never()).generateAccessToken(any());
+        }
+
+        @Test
+        void existingPendingUser_returnsPendingStatus_noNewUserCreated() {
+            stubGoogle("wait@gmail.com");
+            User pending = userWithStatus("wait@gmail.com", UserStatus.PENDING);
+            pending.setId(7L);
+            when(userRepository.findByEmail("wait@gmail.com")).thenReturn(Optional.of(pending));
+
+            GoogleAuthResponse res = authService.loginWithGoogle("valid-token");
+
+            assertThat(res.status()).isEqualTo("PENDING_APPROVAL");
+            assertThat(res.userId()).isEqualTo(7L);
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        void existingActiveUser_returnsJwtPair() {
+            stubGoogle("active@gmail.com");
+            User active = userWithStatus("active@gmail.com", UserStatus.ACTIVE);
+            when(userRepository.findByEmail("active@gmail.com")).thenReturn(Optional.of(active));
+            when(userRepository.save(any())).thenReturn(active);
+            when(jwtTokenProvider.generateAccessToken(any(UserPrincipal.class))).thenReturn("g-access");
+            when(jwtTokenProvider.generateRefreshToken(any(UserPrincipal.class))).thenReturn("g-refresh");
+
+            GoogleAuthResponse res = authService.loginWithGoogle("valid-token");
+
+            assertThat(res.status()).isEqualTo("AUTHENTICATED");
+            assertThat(res.accessToken()).isEqualTo("g-access");
+            assertThat(res.refreshToken()).isEqualTo("g-refresh");
+            verify(userRepository).save(argThat(u -> u.getLastLoginAt() != null));
+        }
+
+        @Test
+        void existingRejectedUser_throws_BR_AUTH_04() {
+            stubGoogle("rej@gmail.com");
+            when(userRepository.findByEmail("rej@gmail.com"))
+                    .thenReturn(Optional.of(userWithStatus("rej@gmail.com", UserStatus.REJECTED)));
+
+            assertThatThrownBy(() -> authService.loginWithGoogle("valid-token"))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-AUTH-04");
         }
     }
 

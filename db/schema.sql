@@ -949,7 +949,8 @@ INSERT INTO system_configs (config_key, config_value, description, updated_by) V
 ('PASSWORD_MIN_LENGTH', '8', 'Minimum password length', 1),
 ('DEFAULT_CURRENCY', 'VND', 'Default event budget currency', 1),
 ('TEAM_MIN_SIZE', '3', 'Minimum team size', 1),
-('TEAM_MAX_SIZE', '5', 'Maximum team size', 1);
+('TEAM_MAX_SIZE', '5', 'Maximum team size', 1),
+('AUTO_APPROVE_ACCOUNTS', 'false', 'Auto-activate accounts that pass registration validation (no manual coordinator approval). Set true to enable.', 1);
 
 -- Term Plan
 INSERT INTO term_plans (id, term, year, discipline_id, max_events, created_by) VALUES

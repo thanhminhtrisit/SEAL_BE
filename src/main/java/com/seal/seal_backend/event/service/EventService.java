@@ -19,6 +19,15 @@ public interface EventService {
     RoundResponse getRound(Long eventId, Long roundId);
     RoundResponse updateRound(Long eventId, Long roundId, UpdateRoundRequest req);
 
+    // --- Round lifecycle (FR-EVT-02 / BR-EVT-02):
+    //     DRAFT → OPEN_FOR_SUBMISSION → SUBMISSION_CLOSED → SCORING_OPEN → SCORING_LOCKED → COMPLETED ---
+    RoundResponse openRoundSubmission(Long eventId, Long roundId, Long coordinatorId);
+    RoundResponse closeRoundSubmission(Long eventId, Long roundId, Long coordinatorId);
+    RoundResponse openRoundScoring(Long eventId, Long roundId, Long coordinatorId);
+    RoundResponse lockRoundScoring(Long eventId, Long roundId, Long coordinatorId);
+    RoundResponse unlockRoundScoring(Long eventId, Long roundId, Long coordinatorId, String reason);
+    RoundResponse completeRound(Long eventId, Long roundId, Long coordinatorId);
+
     // --- Criteria ---
     CriteriaSetResponse addCriteriaSet(Long eventId, CreateCriteriaSetRequest req, Long creatorId);
     List<CriteriaSetResponse> listCriteriaSets(Long eventId);

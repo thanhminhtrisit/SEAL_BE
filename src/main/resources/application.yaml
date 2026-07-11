@@ -44,6 +44,10 @@ jwt:
   expiration: ${JWT_EXPIRATION:86400000}
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000}
 
+# Google Sign-In (GIS ID-token flow). Client ID is public by design — the secret is NOT used in this flow.
+google:
+  client-id: ${GOOGLE_CLIENT_ID:850667015456-lrg13v22qapu46t277s51f1cjhn0pchv.apps.googleusercontent.com}
+
 # CORS
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}

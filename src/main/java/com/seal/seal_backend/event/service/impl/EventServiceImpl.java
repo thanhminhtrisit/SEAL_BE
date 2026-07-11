@@ -822,6 +822,122 @@ public class EventServiceImpl implements EventService {
         return EventResponse.from(saved);
     }
 
+    // ─── Round lifecycle (FR-EVT-02 / BR-EVT-02) ─────────────────────────────
+    // Mirrors the Event lifecycle pattern above: explicit expected-from guard,
+    // owner-coordinator check, audit log with old/new status.
+
+    @Override
+    @Transactional
+    public RoundResponse openRoundSubmission(Long eventId, Long roundId, Long coordinatorId) {
+        Event event = findEvent(eventId);
+        if (event.getStatus() != EventStatus.OPEN && event.getStatus() != EventStatus.IN_PROGRESS) {
+            throw new BusinessRuleException("BR-EVT-02",
+                    "Rounds can only run while the event is OPEN or IN_PROGRESS (current: "
+                    + event.getStatus() + ").");
+        }
+        Round round = findRound(roundId, eventId);
+        validatePreviousRoundsLocked(eventId, round);
+        return transitionRoundStatus(event, round, coordinatorId,
+                RoundStatus.DRAFT, RoundStatus.OPEN_FOR_SUBMISSION,
+                AuditAction.ROUND_SUBMISSION_OPENED, null);
+    }
+
+    @Override
+    @Transactional
+    public RoundResponse closeRoundSubmission(Long eventId, Long roundId, Long coordinatorId) {
+        Event event = findEvent(eventId);
+        Round round = findRound(roundId, eventId);
+        return transitionRoundStatus(event, round, coordinatorId,
+                RoundStatus.OPEN_FOR_SUBMISSION, RoundStatus.SUBMISSION_CLOSED,
+                AuditAction.ROUND_SUBMISSION_CLOSED, null);
+    }
+
+    @Override
+    @Transactional
+    public RoundResponse openRoundScoring(Long eventId, Long roundId, Long coordinatorId) {
+        Event event = findEvent(eventId);
+        Round round = findRound(roundId, eventId);
+        return transitionRoundStatus(event, round, coordinatorId,
+                RoundStatus.SUBMISSION_CLOSED, RoundStatus.SCORING_OPEN,
+                AuditAction.ROUND_SCORING_OPENED, null);
+    }
+
+    @Override
+    @Transactional
+    public RoundResponse lockRoundScoring(Long eventId, Long roundId, Long coordinatorId) {
+        Event event = findEvent(eventId);
+        Round round = findRound(roundId, eventId);
+        return transitionRoundStatus(event, round, coordinatorId,
+                RoundStatus.SCORING_OPEN, RoundStatus.SCORING_LOCKED,
+                AuditAction.ROUND_LOCKED, null);
+    }
+
+    /** BR-SCR-05: unlock is the ONLY controlled way to change scores after lock — reason is mandatory. */
+    @Override
+    @Transactional
+    public RoundResponse unlockRoundScoring(Long eventId, Long roundId, Long coordinatorId, String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessRuleException("BR-SCR-05",
+                    "Unlocking a scoring round requires a reason.");
+        }
+        Event event = findEvent(eventId);
+        Round round = findRound(roundId, eventId);
+        return transitionRoundStatus(event, round, coordinatorId,
+                RoundStatus.SCORING_LOCKED, RoundStatus.SCORING_OPEN,
+                AuditAction.ROUND_UNLOCKED, reason);
+    }
+
+    @Override
+    @Transactional
+    public RoundResponse completeRound(Long eventId, Long roundId, Long coordinatorId) {
+        Event event = findEvent(eventId);
+        Round round = findRound(roundId, eventId);
+        return transitionRoundStatus(event, round, coordinatorId,
+                RoundStatus.SCORING_LOCKED, RoundStatus.COMPLETED,
+                AuditAction.ROUND_COMPLETED, null);
+    }
+
+    /** BR-EVT-02: round N cannot open for submission before every earlier round is locked/completed. */
+    private void validatePreviousRoundsLocked(Long eventId, Round round) {
+        roundRepository.findByEventIdOrderByOrderNumber(eventId).stream()
+                .filter(r -> r.getOrderNumber() < round.getOrderNumber())
+                .filter(r -> r.getStatus() != RoundStatus.SCORING_LOCKED
+                        && r.getStatus() != RoundStatus.COMPLETED)
+                .findFirst()
+                .ifPresent(r -> {
+                    throw new BusinessRuleException("BR-EVT-02",
+                            "Round '" + r.getName() + "' (order " + r.getOrderNumber()
+                            + ") must be SCORING_LOCKED or COMPLETED first (current: "
+                            + r.getStatus() + ").");
+                });
+    }
+
+    /** Shared transition helper for all Round lifecycle changes (same shape as Event's transitionStatus). */
+    private RoundResponse transitionRoundStatus(Event event, Round round, Long coordinatorId,
+                                                RoundStatus expectedFrom, RoundStatus to,
+                                                AuditAction auditAction, String reason) {
+        if (!event.getOwnerCoordinator().getId().equals(coordinatorId)) {
+            throw new ForbiddenActionException(
+                    "Only the owner coordinator can change this round's status.");
+        }
+        if (round.getStatus() != expectedFrom) {
+            throw new BusinessRuleException("BR-EVT-02",
+                    "Cannot transition round to " + to + ": expected " + expectedFrom
+                    + " but round is " + round.getStatus() + ".");
+        }
+
+        String oldStatus = round.getStatus().name();
+        round.setStatus(to);
+        Round saved = roundRepository.save(round);
+
+        User coordinator = userRepository.findById(coordinatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + coordinatorId));
+        auditPublisher.log(coordinator, auditAction, "ROUND", round.getId(),
+                "{\"status\":\"" + oldStatus + "\"}", "{\"status\":\"" + to + "\"}", reason, null);
+
+        return RoundResponse.from(saved);
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     // ─── Mentor Planning ──────────────────────────────────────────────────────

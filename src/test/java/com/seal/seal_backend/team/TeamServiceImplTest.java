@@ -330,12 +330,18 @@ class TeamServiceImplTest {
     class InviteMember {
 
         @Test
-        void duplicateEmail_throws_BR_TEAM_06() {
+        void duplicatePendingInvitation_throws_BR_TEAM_06() {
+            TeamInvitation pending = new TeamInvitation();
+            pending.setId(10L);
+            pending.setTeam(sampleTeam);
+            pending.setEmail("member@student.local");
+            pending.setStatus(InvitationStatus.PENDING);
+
             when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
             when(userRepository.findById(7L)).thenReturn(Optional.of(sampleLeader));
             when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
-            when(teamInvitationRepository.existsByTeamIdAndEmail(1L, "member@student.local"))
-                    .thenReturn(true);
+            when(teamInvitationRepository.findByTeamIdAndEmail(1L, "member@student.local"))
+                    .thenReturn(Optional.of(pending));
 
             assertThatThrownBy(() -> service.inviteMember(1L,
                     new InviteMemberRequest("member@student.local"), 7L))
@@ -352,8 +358,8 @@ class TeamServiceImplTest {
             when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
             when(userRepository.findById(7L)).thenReturn(Optional.of(sampleLeader));
             when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
-            when(teamInvitationRepository.existsByTeamIdAndEmail(1L, "taken@student.local"))
-                    .thenReturn(false);
+            when(teamInvitationRepository.findByTeamIdAndEmail(1L, "taken@student.local"))
+                    .thenReturn(Optional.empty());
             when(userRepository.findByEmail("taken@student.local")).thenReturn(Optional.of(invitee));
             when(teamRepository.existsActiveMemberByUserIdAndEventId(9L, 1L)).thenReturn(true);
 
@@ -661,6 +667,270 @@ class TeamServiceImplTest {
 
             assertThatNoException().isThrownBy(() ->
                     service.reviewTeam(1L, new ApproveTeamRequest(true, null), 3L, "127.0.0.1"));
+        }
+    }
+
+    // ─── Team realism package: roster lifecycle ───────────────────────────────
+
+    @Nested
+    class RosterLifecycle {
+
+        private User member8;
+        private TeamMember activeMember8;
+
+        @BeforeEach
+        void rosterSetup() {
+            member8 = new User();
+            member8.setId(8L);
+            member8.setEmail("member@student.local");
+            member8.setFullName("Member Eight");
+
+            activeMember8 = new TeamMember();
+            activeMember8.setTeam(sampleTeam);
+            activeMember8.setUser(member8);
+            activeMember8.setMemberRole(TeamMemberRole.MEMBER);
+            activeMember8.setStatus(TeamMemberStatus.ACTIVE);
+        }
+
+        // ── Guards: invite/accept khóa theo trạng thái ────────────────────
+
+        @Test
+        void invite_teamApproved_throws_BR_TEAM_08() {
+            sampleTeam.setStatus(TeamStatus.APPROVED);
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(userRepository.findById(7L)).thenReturn(Optional.of(sampleLeader));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+
+            assertThatThrownBy(() -> service.inviteMember(1L,
+                    new InviteMemberRequest("x@y.com"), 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-08");
+        }
+
+        @Test
+        void invite_windowClosed_throws_BR_TEAM_04() {
+            sampleEvent.setRegistrationEnd(LocalDateTime.now().minusDays(1));
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(userRepository.findById(7L)).thenReturn(Optional.of(sampleLeader));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+
+            assertThatThrownBy(() -> service.inviteMember(1L,
+                    new InviteMemberRequest("x@y.com"), 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-04");
+        }
+
+        @Test
+        void reinvite_afterDeclined_reusesRow_resetsToPending() {
+            TeamInvitation declined = new TeamInvitation();
+            declined.setId(10L);
+            declined.setTeam(sampleTeam);
+            declined.setEmail("again@student.local");
+            declined.setStatus(InvitationStatus.DECLINED);
+
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(userRepository.findById(7L)).thenReturn(Optional.of(sampleLeader));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+            when(teamInvitationRepository.findByTeamIdAndEmail(1L, "again@student.local"))
+                    .thenReturn(Optional.of(declined));
+            when(userRepository.findByEmail("again@student.local")).thenReturn(Optional.empty());
+            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(1L);
+            when(capacityService.effectiveMaxTeamSize(sampleEvent)).thenReturn(5);
+            when(teamInvitationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            service.inviteMember(1L, new InviteMemberRequest("again@student.local"), 7L);
+
+            // Cùng row cũ được reset về PENDING — không insert row mới (UNIQUE team+email)
+            verify(teamInvitationRepository).save(argThat(i ->
+                    i.getId().equals(10L) && i.getStatus() == InvitationStatus.PENDING
+                    && i.getExpiresAt() != null));
+        }
+
+        @Test
+        void accept_teamApproved_throws_BR_TEAM_08() {
+            sampleTeam.setStatus(TeamStatus.APPROVED);
+            TeamInvitation inv = new TeamInvitation();
+            inv.setId(10L);
+            inv.setTeam(sampleTeam);
+            inv.setEmail("member@student.local");
+            inv.setStatus(InvitationStatus.PENDING);
+            inv.setExpiresAt(LocalDateTime.now().plusDays(7));
+
+            when(teamInvitationRepository.findById(10L)).thenReturn(Optional.of(inv));
+            when(userRepository.findById(8L)).thenReturn(Optional.of(member8));
+
+            assertThatThrownBy(() -> service.acceptInvitation(10L, 8L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-08");
+        }
+
+        @Test
+        void accept_rejoinAfterRemoved_reactivatesExistingRow() {
+            TeamMember removedRow = new TeamMember();
+            removedRow.setTeam(sampleTeam);
+            removedRow.setUser(member8);
+            removedRow.setMemberRole(TeamMemberRole.MEMBER);
+            removedRow.setStatus(TeamMemberStatus.REMOVED);
+            removedRow.setLeftAt(LocalDateTime.now().minusDays(1));
+
+            TeamInvitation inv = new TeamInvitation();
+            inv.setId(10L);
+            inv.setTeam(sampleTeam);
+            inv.setEmail("member@student.local");
+            inv.setStatus(InvitationStatus.PENDING);
+            inv.setExpiresAt(LocalDateTime.now().plusDays(7));
+
+            when(teamInvitationRepository.findById(10L)).thenReturn(Optional.of(inv));
+            when(userRepository.findById(8L)).thenReturn(Optional.of(member8));
+            when(teamRepository.existsActiveMemberByUserIdAndEventId(8L, 1L)).thenReturn(false);
+            when(teamMemberRepository.countActiveByTeamId(1L)).thenReturn(1L);
+            when(capacityService.effectiveMaxTeamSize(sampleEvent)).thenReturn(5);
+            when(teamMemberRepository.countDistinctParticipantsByEventId(1L)).thenReturn(1L);
+            when(capacityService.effectiveMaxParticipants(sampleEvent)).thenReturn(300);
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember, removedRow));
+            when(teamMemberRepository.save(any(TeamMember.class))).thenAnswer(i -> i.getArgument(0));
+            when(teamInvitationRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            service.acceptInvitation(10L, 8L);
+
+            // Row cũ được reactivate — không tạo row mới trùng composite PK (team_id,user_id)
+            assertThat(removedRow.getStatus()).isEqualTo(TeamMemberStatus.ACTIVE);
+            assertThat(removedRow.getLeftAt()).isNull();
+            verify(teamMemberRepository).save(same(removedRow));
+        }
+
+        // ── Roster lock + LEFT/REMOVED ────────────────────────────────────
+
+        @Test
+        void removeMember_teamApproved_throws_BR_TEAM_08() {
+            sampleTeam.setStatus(TeamStatus.APPROVED);
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+
+            assertThatThrownBy(() -> service.removeMember(1L, 8L, 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-08");
+        }
+
+        @Test
+        void selfLeave_setsStatusLEFT_kick_setsREMOVED() {
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L))
+                    .thenReturn(List.of(leaderMember, activeMember8));
+            when(teamMemberRepository.save(any(TeamMember.class))).thenAnswer(i -> i.getArgument(0));
+
+            service.removeMember(1L, 8L, 8L); // tự rời
+
+            assertThat(activeMember8.getStatus()).isEqualTo(TeamMemberStatus.LEFT);
+        }
+
+        // ── Resubmit REJECTED → REGISTERED ────────────────────────────────
+
+        @Test
+        void resubmit_rejectedTeam_becomesRegistered_andClearsReason() {
+            sampleTeam.setStatus(TeamStatus.REJECTED);
+            sampleTeam.setRejectionReason("Thiếu thành viên");
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+            when(teamRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            TeamResponse resp = service.resubmitTeam(1L, 7L);
+
+            assertThat(resp.status()).isEqualTo(TeamStatus.REGISTERED);
+            assertThat(sampleTeam.getRejectionReason()).isNull();
+        }
+
+        @Test
+        void resubmit_registeredTeam_throws_BR_TEAM_05() {
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+
+            assertThatThrownBy(() -> service.resubmitTeam(1L, 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-05");
+        }
+
+        // ── Transfer leadership ───────────────────────────────────────────
+
+        @Test
+        void transferLeadership_swapsRoles_andUpdatesTeamLeader() {
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L))
+                    .thenReturn(List.of(leaderMember, activeMember8));
+            when(teamMemberRepository.save(any(TeamMember.class))).thenAnswer(i -> i.getArgument(0));
+            when(teamRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            service.transferLeadership(1L, new TransferLeadershipRequest(8L), 7L);
+
+            assertThat(leaderMember.getMemberRole()).isEqualTo(TeamMemberRole.MEMBER);
+            assertThat(activeMember8.getMemberRole()).isEqualTo(TeamMemberRole.LEADER);
+            assertThat(sampleTeam.getLeader().getId()).isEqualTo(8L);
+        }
+
+        @Test
+        void transferLeadership_targetNotActiveMember_throws_BR_TEAM_05() {
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+
+            assertThatThrownBy(() -> service.transferLeadership(1L,
+                    new TransferLeadershipRequest(99L), 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-05");
+        }
+
+        // ── Withdraw ──────────────────────────────────────────────────────
+
+        @Test
+        void withdraw_beforeEventStart_setsWithdrawn() {
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+            when(teamRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            TeamResponse resp = service.withdrawTeam(1L, 7L);
+
+            assertThat(resp.status()).isEqualTo(TeamStatus.WITHDRAWN);
+        }
+
+        @Test
+        void withdraw_afterEventStarted_throws_BR_TEAM_08() {
+            sampleEvent.setStatus(EventStatus.IN_PROGRESS);
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+
+            assertThatThrownBy(() -> service.withdrawTeam(1L, 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-08");
+        }
+
+        // ── Update info + revoke invitation ───────────────────────────────
+
+        @Test
+        void updateTeam_afterApproval_throws_BR_TEAM_08() {
+            sampleTeam.setStatus(TeamStatus.APPROVED);
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+
+            assertThatThrownBy(() -> service.updateTeam(1L,
+                    new UpdateTeamRequest("New Name", null), 7L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-TEAM-08");
+        }
+
+        @Test
+        void revokeInvitation_pending_setsCancelled() {
+            TeamInvitation pending = new TeamInvitation();
+            pending.setId(10L);
+            pending.setTeam(sampleTeam);
+            pending.setEmail("someone@student.local");
+            pending.setStatus(InvitationStatus.PENDING);
+
+            when(teamRepository.findById(1L)).thenReturn(Optional.of(sampleTeam));
+            when(teamMemberRepository.findByTeamId(1L)).thenReturn(List.of(leaderMember));
+            when(teamInvitationRepository.findById(10L)).thenReturn(Optional.of(pending));
+            when(teamInvitationRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            var resp = service.revokeInvitation(1L, 10L, 7L);
+
+            assertThat(pending.getStatus()).isEqualTo(InvitationStatus.CANCELLED);
         }
     }
 
