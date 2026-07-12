@@ -4,6 +4,7 @@ import com.seal.seal_backend.scoring.dto.request.SaveScoresRequest;
 import com.seal.seal_backend.scoring.dto.request.StartEvaluationRequest;
 import com.seal.seal_backend.scoring.dto.request.SubmitEvaluationRequest;
 import com.seal.seal_backend.scoring.dto.response.EvaluationAuditEntryResponse;
+import com.seal.seal_backend.scoring.dto.response.EvaluationHistoryResponse;
 import com.seal.seal_backend.scoring.dto.response.EvaluationResponse;
 import com.seal.seal_backend.scoring.dto.response.JudgeAssignedSubmissionResponse;
 
@@ -18,6 +19,8 @@ public interface EvaluationService {
     EvaluationResponse getEvaluationById(Long currentUserId, Long evaluationId);
 
     List<EvaluationAuditEntryResponse> getEvaluationAudit(Long currentUserId, Long evaluationId);
+
+    EvaluationHistoryResponse getEvaluationHistory(Long currentUserId, Long evaluationId);
 
     EvaluationResponse saveDraftScores(Long currentUserId, Long evaluationId, SaveScoresRequest request);
 
