@@ -331,7 +331,7 @@ class AuthServiceImplTest {
                     u.getStatus() == UserStatus.ACTIVE
                     && u.getApprovedAt() != null
                     && u.getApprovedBy() == null));
-            verify(auditPublisher).log(any(), eq(AuditAction.ACCOUNT_AUTO_APPROVED),
+            verify(auditPublisher).logInSameTransaction(any(), eq(AuditAction.ACCOUNT_AUTO_APPROVED),
                     eq("USER"), eq(43L), isNull(), any(),
                     contains("AUTO_APPROVE_ACCOUNTS"), isNull());
         }
@@ -372,7 +372,7 @@ class AuthServiceImplTest {
             assertThat(res.status()).isEqualTo("AUTHENTICATED");
             assertThat(res.userId()).isEqualTo(56L);
             assertThat(res.accessToken()).isEqualTo("auto-access");
-            verify(auditPublisher).log(any(), eq(AuditAction.ACCOUNT_AUTO_APPROVED),
+            verify(auditPublisher).logInSameTransaction(any(), eq(AuditAction.ACCOUNT_AUTO_APPROVED),
                     eq("USER"), eq(56L), isNull(), any(),
                     contains("Google-verified"), isNull());
         }

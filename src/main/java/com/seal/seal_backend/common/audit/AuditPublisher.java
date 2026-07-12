@@ -25,6 +25,24 @@ public class AuditPublisher {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void log(User actor, AuditAction action, String targetType, Long targetId,
                     String oldValueJson, String newValueJson, String reason, String ip) {
+        repo.save(build(actor, action, targetType, targetId, oldValueJson, newValueJson, reason, ip));
+    }
+
+    /**
+     * Joins the CALLER's transaction (no new connection). REQUIRED when the actor row was
+     * just INSERTed in the same still-open transaction (e.g. self-registration auto-approve,
+     * Google sign-up): a REQUIRES_NEW insert would FK-wait on the uncommitted actor row and
+     * deadlock until innodb_lock_wait_timeout (MySQL error 1205). Semantically correct too —
+     * if the registration rolls back, its audit entry must roll back with it.
+     */
+    @Transactional(propagation = Propagation.REQUIRED)
+    public void logInSameTransaction(User actor, AuditAction action, String targetType, Long targetId,
+                                     String oldValueJson, String newValueJson, String reason, String ip) {
+        repo.save(build(actor, action, targetType, targetId, oldValueJson, newValueJson, reason, ip));
+    }
+
+    private AuditLog build(User actor, AuditAction action, String targetType, Long targetId,
+                           String oldValueJson, String newValueJson, String reason, String ip) {
         AuditLog e = new AuditLog();
         e.setActor(actor);
         e.setActionType(action.name());
@@ -34,6 +52,6 @@ public class AuditPublisher {
         e.setNewValue(newValueJson);
         e.setReason(reason);
         e.setIpAddress(ip);
-        repo.save(e);
+        return e;
     }
 }
