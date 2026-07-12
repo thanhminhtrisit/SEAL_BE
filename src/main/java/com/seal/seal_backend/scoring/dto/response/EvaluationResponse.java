@@ -22,6 +22,8 @@ public class EvaluationResponse {
 
     private Long roundId;
 
+    private String roundStatus;
+
     private Long eventId;
 
     private String eventName;

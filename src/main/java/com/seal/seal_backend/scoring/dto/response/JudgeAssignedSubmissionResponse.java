@@ -16,6 +16,7 @@ public class JudgeAssignedSubmissionResponse {
     private String categoryName;
     private Long roundId;
     private String roundName;
+    private String roundStatus;
     private Long eventId;
     private String eventName;
     private Integer attemptNumber;

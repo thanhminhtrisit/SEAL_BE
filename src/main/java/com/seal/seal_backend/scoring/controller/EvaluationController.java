@@ -6,6 +6,7 @@ import com.seal.seal_backend.scoring.dto.request.SaveScoresRequest;
 import com.seal.seal_backend.scoring.dto.request.StartEvaluationRequest;
 import com.seal.seal_backend.scoring.dto.request.SubmitEvaluationRequest;
 import com.seal.seal_backend.scoring.dto.response.EvaluationAuditEntryResponse;
+import com.seal.seal_backend.scoring.dto.response.EvaluationHistoryResponse;
 import com.seal.seal_backend.scoring.dto.response.EvaluationResponse;
 import com.seal.seal_backend.scoring.dto.response.JudgeAssignedSubmissionResponse;
 import com.seal.seal_backend.scoring.service.EvaluationService;
@@ -61,6 +62,15 @@ public class EvaluationController {
             @PathVariable Long evaluationId
     ) {
         return ResponseEntity.ok(evaluationService.getEvaluationAudit(currentUser.getId(), evaluationId));
+    }
+
+    @PreAuthorize("hasRole('JUDGE')")
+    @GetMapping("/{evaluationId}/history")
+    public ResponseEntity<EvaluationHistoryResponse> getEvaluationHistory(
+            @CurrentUser UserPrincipal currentUser,
+            @PathVariable Long evaluationId
+    ) {
+        return ResponseEntity.ok(evaluationService.getEvaluationHistory(currentUser.getId(), evaluationId));
     }
 
     @PreAuthorize("hasRole('JUDGE')")

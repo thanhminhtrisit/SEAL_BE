@@ -1,5 +1,7 @@
 package com.seal.seal_backend.scoring.service.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.seal.seal_backend.common.exception.ResourceNotFoundException;
 import com.seal.seal_backend.common.audit.AuditAction;
 import com.seal.seal_backend.common.audit.AuditPublisher;
@@ -13,6 +15,8 @@ import com.seal.seal_backend.scoring.dto.request.ScoreItemRequest;
 import com.seal.seal_backend.scoring.dto.request.StartEvaluationRequest;
 import com.seal.seal_backend.scoring.dto.request.SubmitEvaluationRequest;
 import com.seal.seal_backend.scoring.dto.response.EvaluationAuditEntryResponse;
+import com.seal.seal_backend.scoring.dto.response.EvaluationHistoryItemResponse;
+import com.seal.seal_backend.scoring.dto.response.EvaluationHistoryResponse;
 import com.seal.seal_backend.scoring.dto.response.EvaluationResponse;
 import com.seal.seal_backend.scoring.dto.response.JudgeAssignedSubmissionResponse;
 import com.seal.seal_backend.scoring.dto.response.ScoreResponse;
@@ -47,6 +51,9 @@ public class EvaluationServiceImpl implements EvaluationService {
     private final JudgeAssignmentRepository judgeAssignmentRepository;
     private final AuditLogRepository auditLogRepository;
     private final AuditPublisher auditPublisher;
+    private final ObjectMapper historyObjectMapper = new ObjectMapper();
+
+    private static final TypeReference<Map<String, Object>> AUDIT_VALUE_TYPE = new TypeReference<>() {};
 
     @Override
     @Transactional(readOnly = true)
@@ -100,6 +107,7 @@ public class EvaluationServiceImpl implements EvaluationService {
                     .categoryName(submission.getTeam().getCategory().getName())
                     .roundId(submission.getRound().getId())
                     .roundName(submission.getRound().getName())
+                    .roundStatus(submission.getRound().getStatus().name())
                     .eventId(submission.getRound().getEvent().getId())
                     .eventName(submission.getRound().getEvent().getName())
                     .attemptNumber(submission.getAttemptNumber())
@@ -137,6 +145,47 @@ public class EvaluationServiceImpl implements EvaluationService {
                 .sorted(Comparator.comparing(AuditLog::getCreatedAt).thenComparing(AuditLog::getId))
                 .map(this::toAuditEntryResponse)
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public EvaluationHistoryResponse getEvaluationHistory(Long currentUserId, Long evaluationId) {
+        Evaluation evaluation = getEvaluationOrThrow(evaluationId);
+        validateEvaluationOwner(evaluation, currentUserId);
+
+        List<AuditLog> evaluationLogs = auditLogRepository.findByTargetTypeAndTargetIdOrderByCreatedAtAscIdAsc("EVALUATION", evaluationId);
+        List<Score> scores = scoreRepository.findByEvaluation_IdOrderByCriterion_DisplayOrderAsc(evaluationId);
+        List<Long> scoreIds = scores.stream()
+                .map(Score::getId)
+                .toList();
+        List<AuditLog> scoreLogs = scoreIds.isEmpty()
+                ? List.of()
+                : auditLogRepository.findByTargetTypeAndTargetIdInOrderByCreatedAtAscIdAsc("SCORE", scoreIds);
+
+        Map<Long, String> criterionNameByScoreId = scores.stream()
+                .filter(score -> score.getId() != null && score.getCriterion() != null)
+                .collect(Collectors.toMap(
+                        Score::getId,
+                        score -> score.getCriterion().getName(),
+                        (left, right) -> left
+                ));
+        Map<Long, String> criterionNameByCriterionId = scores.stream()
+                .filter(score -> score.getCriterion() != null && score.getCriterion().getId() != null)
+                .collect(Collectors.toMap(
+                        score -> score.getCriterion().getId(),
+                        score -> score.getCriterion().getName(),
+                        (left, right) -> left
+                ));
+
+        List<EvaluationHistoryItemResponse> items = java.util.stream.Stream.concat(evaluationLogs.stream(), scoreLogs.stream())
+                .sorted(Comparator.comparing(AuditLog::getCreatedAt).reversed().thenComparing(AuditLog::getId, Comparator.reverseOrder()))
+                .map(log -> toHistoryItemResponse(log, criterionNameByScoreId, criterionNameByCriterionId))
+                .toList();
+
+        return EvaluationHistoryResponse.builder()
+                .evaluationStatus(evaluation.getStatus() != null ? evaluation.getStatus().name() : null)
+                .items(items)
+                .build();
     }
 
     @Override
@@ -297,6 +346,9 @@ public class EvaluationServiceImpl implements EvaluationService {
         validateEvaluationOwner(evaluation, currentUserId);
         resolveActiveJudgeAssignment(evaluation.getJudge().getId(), evaluation.getSubmission());
         validateEvaluationIsEditable(evaluation);
+        if (evaluation.getStatus() != EvaluationStatus.DRAFT) {
+            throw new BusinessException("Only draft evaluations can be submitted");
+        }
 
         if (request.getGeneralComment() != null) {
             evaluation.setGeneralComment(request.getGeneralComment());
@@ -470,6 +522,7 @@ public class EvaluationServiceImpl implements EvaluationService {
                 .judgeId(evaluation.getJudge().getId())
                 .submissionId(submission.getId())
                 .roundId(round != null ? round.getId() : null)
+                .roundStatus(round != null && round.getStatus() != null ? round.getStatus().name() : null)
                 .eventId(event != null ? event.getId() : null)
                 .eventName(event != null ? event.getName() : null)
                 .teamId(team != null ? team.getId() : null)
@@ -600,6 +653,153 @@ public class EvaluationServiceImpl implements EvaluationService {
                 .actorEmail(log.getActor() != null ? log.getActor().getEmail() : null)
                 .createdAt(log.getCreatedAt())
                 .build();
+    }
+
+    private EvaluationHistoryItemResponse toHistoryItemResponse(
+            AuditLog log,
+            Map<Long, String> criterionNameByScoreId,
+            Map<Long, String> criterionNameByCriterionId
+    ) {
+        Map<String, Object> oldValue = parseAuditJson(log.getOldValue());
+        Map<String, Object> newValue = parseAuditJson(log.getNewValue());
+        String actionType = log.getActionType();
+        Long criterionId = firstLong(oldValue.get("criterionId"), newValue.get("criterionId"));
+        String criterionName = null;
+        if ("SCORE".equals(log.getTargetType())) {
+            criterionName = criterionNameByScoreId.get(log.getTargetId());
+        }
+        if (criterionName == null && criterionId != null) {
+            criterionName = criterionNameByCriterionId.get(criterionId);
+        }
+
+        String oldScore = firstString(oldValue.get("oldScoreValue"), oldValue.get("scoreValue"));
+        String newScore = firstString(newValue.get("newScoreValue"), newValue.get("scoreValue"));
+        String oldComment = firstString(oldValue.get("oldComment"), oldValue.get("generalComment"));
+        String newComment = firstString(newValue.get("newComment"), newValue.get("generalComment"));
+        String oldStatus = firstString(oldValue.get("oldStatus"), oldValue.get("status"));
+        String newStatus = firstString(newValue.get("newStatus"), newValue.get("status"));
+
+        return EvaluationHistoryItemResponse.builder()
+                .actionType(actionType)
+                .actionLabel(historyActionLabel(actionType))
+                .actorName(log.getActor() != null ? preferredActorName(log.getActor()) : "System")
+                .criterionName(criterionName)
+                .oldScoreValue(oldScore)
+                .newScoreValue(newScore)
+                .oldComment(oldComment)
+                .newComment(newComment)
+                .oldStatus(oldStatus)
+                .newStatus(newStatus)
+                .occurredAt(log.getCreatedAt())
+                .description(historyDescription(actionType, criterionName, oldScore, newScore, oldComment, newComment, oldStatus, newStatus))
+                .build();
+    }
+
+    private Map<String, Object> parseAuditJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> parsed = historyObjectMapper.readValue(raw, AUDIT_VALUE_TYPE);
+            return parsed != null ? parsed : Map.of();
+        } catch (Exception ignored) {
+            return Map.of();
+        }
+    }
+
+    private String historyActionLabel(String actionType) {
+        if (actionType == null) {
+            return "History event";
+        }
+        return switch (actionType) {
+            case "EVALUATION_STARTED" -> "Evaluation started";
+            case "SCORE_CREATED" -> "Score added";
+            case "SCORE_UPDATED" -> "Score updated";
+            case "EVALUATION_UPDATED" -> "Evaluation comment updated";
+            case "EVALUATION_SUBMITTED" -> "Evaluation submitted";
+            case "EVALUATION_LOCKED", "ROUND_LOCKED" -> "Evaluation locked";
+            default -> actionType.replace('_', ' ').toLowerCase();
+        };
+    }
+
+    private String historyDescription(
+            String actionType,
+            String criterionName,
+            String oldScore,
+            String newScore,
+            String oldComment,
+            String newComment,
+            String oldStatus,
+            String newStatus
+    ) {
+        if ("SCORE_CREATED".equals(actionType)) {
+            return "Score added" + (criterionName != null ? " for " + criterionName : "")
+                    + (newScore != null ? ": " + newScore : "");
+        }
+        if ("SCORE_UPDATED".equals(actionType)) {
+            if (oldScore != null || newScore != null) {
+                return "Score changed" + (criterionName != null ? " for " + criterionName : "")
+                        + ": " + valueOrEmpty(oldScore) + " -> " + valueOrEmpty(newScore);
+            }
+            if (oldComment != null || newComment != null) {
+                return "Criterion comment changed" + (criterionName != null ? " for " + criterionName : "");
+            }
+        }
+        if ("EVALUATION_UPDATED".equals(actionType)) {
+            return "General evaluation comment changed";
+        }
+        if ("EVALUATION_SUBMITTED".equals(actionType)) {
+            return "Evaluation status changed: " + valueOrEmpty(oldStatus) + " -> " + valueOrEmpty(newStatus);
+        }
+        if ("EVALUATION_STARTED".equals(actionType)) {
+            return "Evaluation scoring session started";
+        }
+        return historyActionLabel(actionType);
+    }
+
+    private String preferredActorName(User user) {
+        if (user.getFullName() != null && !user.getFullName().isBlank()) {
+            return user.getFullName();
+        }
+        if (user.getEmail() != null && !user.getEmail().isBlank()) {
+            return user.getEmail();
+        }
+        return "System";
+    }
+
+    private String valueOrEmpty(String value) {
+        return value == null ? "empty" : value;
+    }
+
+    private String firstString(Object first, Object second) {
+        String value = objectToString(first);
+        return value != null ? value : objectToString(second);
+    }
+
+    private Long firstLong(Object first, Object second) {
+        Long value = objectToLong(first);
+        return value != null ? value : objectToLong(second);
+    }
+
+    private String objectToString(Object value) {
+        if (value == null) {
+            return null;
+        }
+        return String.valueOf(value);
+    }
+
+    private Long objectToLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Long.parseLong(text);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private String jsonString(String value) {

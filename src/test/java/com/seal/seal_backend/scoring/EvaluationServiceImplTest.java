@@ -333,6 +333,11 @@ class EvaluationServiceImplTest {
     }
 
     @Test
+    void submittedScoreChangeCreatesUpdatedAuditLogWithOldAndNewValues() {
+        assertScoreUpdateAudit(EvaluationStatus.SUBMITTED, new BigDecimal("7"), new BigDecimal("8"), "submitted old", "submitted new");
+    }
+
+    @Test
     void identicalSaveCreatesNoAuditLog() {
         User judge = user(4L);
         Submission submission = submittedSubmission(9L, 1L, 10L);
@@ -443,44 +448,23 @@ class EvaluationServiceImplTest {
     }
 
     @Test
-    void resubmitKeepsSubmittedStatusAndLogsPreviousSubmittedState() {
+    void submitAlreadySubmittedEvaluationIsRejected() {
         User judge = user(4L);
         Submission submission = submittedSubmission(9L, 1L, 10L);
         Evaluation evaluation = evaluation(1L, judge, submission, EvaluationStatus.SUBMITTED);
         LocalDateTime firstSubmittedAt = LocalDateTime.of(2026, 7, 1, 10, 30);
         evaluation.setSubmittedAt(firstSubmittedAt);
-        ScoringCriterion criterion = criterion(1L, "Code", 10L, 1);
-        Score score = score(100L, evaluation, criterion, BigDecimal.TEN, "ok");
 
         when(evaluationRepository.findById(1L)).thenReturn(Optional.of(evaluation));
         when(judgeAssignmentRepository.findByJudgeIdAndRoundIdAndStatus(4L, 1L, AssignmentStatus.ACTIVE))
                 .thenReturn(List.of(activeAssignment(11L, 4L, 1L, 10L)));
-        when(scoringCriterionRepository.findByCriteriaSet_Round_IdAndIsActiveTrueOrderByDisplayOrderAsc(1L))
-                .thenReturn(List.of(criterion));
-        when(scoreRepository.findByEvaluation_IdOrderByCriterion_DisplayOrderAsc(1L))
-                .thenReturn(List.of(score));
-        when(evaluationRepository.save(any(Evaluation.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        var response = service.submitEvaluation(4L, 1L, new SubmitEvaluationRequest());
+        assertThatThrownBy(() -> service.submitEvaluation(4L, 1L, new SubmitEvaluationRequest()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Only draft evaluations can be submitted");
 
-        assertThat(response.getStatus()).isEqualTo(EvaluationStatus.SUBMITTED);
-        assertThat(response.getSubmittedAt()).isEqualTo(firstSubmittedAt);
-
-        ArgumentCaptor<String> oldJson = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> newJson = ArgumentCaptor.forClass(String.class);
-        verify(auditPublisher).log(
-                org.mockito.ArgumentMatchers.eq(judge),
-                org.mockito.ArgumentMatchers.eq(AuditAction.EVALUATION_SUBMITTED),
-                org.mockito.ArgumentMatchers.eq("EVALUATION"),
-                org.mockito.ArgumentMatchers.eq(1L),
-                oldJson.capture(),
-                newJson.capture(),
-                org.mockito.ArgumentMatchers.isNull(),
-                org.mockito.ArgumentMatchers.isNull()
-        );
-        assertThat(oldJson.getValue()).contains("\"status\":\"SUBMITTED\"");
-        assertThat(oldJson.getValue()).contains("\"submittedAt\":\"2026-07-01T10:30\"");
-        assertThat(newJson.getValue()).contains("\"status\":\"SUBMITTED\"");
+        verify(evaluationRepository, never()).save(any(Evaluation.class));
+        verify(auditPublisher, never()).log(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -593,9 +577,13 @@ class EvaluationServiceImplTest {
     }
 
     private void assertScoreUpdateAudit(BigDecimal oldScore, BigDecimal newScore, String oldComment, String newComment) {
+        assertScoreUpdateAudit(EvaluationStatus.DRAFT, oldScore, newScore, oldComment, newComment);
+    }
+
+    private void assertScoreUpdateAudit(EvaluationStatus evaluationStatus, BigDecimal oldScore, BigDecimal newScore, String oldComment, String newComment) {
         User judge = user(4L);
         Submission submission = submittedSubmission(9L, 1L, 10L);
-        Evaluation evaluation = evaluation(1L, judge, submission, EvaluationStatus.DRAFT);
+        Evaluation evaluation = evaluation(1L, judge, submission, evaluationStatus);
         ScoringCriterion criterion = criterion(1L, "Code", 10L, 1);
         Score existing = score(100L, evaluation, criterion, oldScore, oldComment);
 
