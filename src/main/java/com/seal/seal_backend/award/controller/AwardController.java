@@ -138,4 +138,26 @@ public class AwardController {
         ParticipantResultResponse result = awardService.getParticipantResult(eventId, user.getId());
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
+
+    @DeleteMapping("/{awardId}")
+    @Operation(summary = "Xóa một giải thưởng bị trao sai")
+    @PreAuthorize("hasAnyRole('COORDINATOR', 'SUPER_COORDINATOR')")
+    public ResponseEntity<ApiResponse<String>> deleteAward(
+            @PathVariable Long awardId,
+            Authentication authentication
+    ) {
+        Long userId = null;
+        if (authentication != null && authentication.getPrincipal() != null) {
+            Object principal = authentication.getPrincipal();
+            try {
+                java.lang.reflect.Method getIdMethod = principal.getClass().getMethod("getId");
+                userId = (Long) getIdMethod.invoke(principal);
+            } catch (Exception e) {
+                throw new IllegalStateException("Lỗi: " + e.getMessage());
+            }
+        }
+
+        awardService.deleteAward(awardId, userId);
+        return ResponseEntity.ok(ApiResponse.ok("Đã xóa giải thưởng thành công!"));
+    }
 }

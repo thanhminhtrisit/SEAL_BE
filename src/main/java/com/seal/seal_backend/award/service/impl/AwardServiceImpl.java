@@ -336,4 +336,20 @@ public class AwardServiceImpl implements AwardService {
 
         return new ParticipantResultResponse(teamId, teamName, categoryName, rankPosition, totalScore, awardType, awardDesc);
     }
+
+    @Transactional
+    @Override
+    public void deleteAward(Long awardId, Long userId) {
+        log.info("Coordinator (ID:{}) đang XÓA giải thưởng ID: {}", userId, awardId);
+
+        Award award = awardRepository.findById(awardId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy giải thưởng với ID: " + awardId));
+
+        // (Tùy chọn) Kiểm tra nếu sự kiện đã COMPLETED thì không cho xóa
+        if ("COMPLETED".equals(award.getEvent().getStatus().name())) {
+            throw new RuntimeException("Không thể xóa giải thưởng vì sự kiện này đã công bố kết quả!");
+        }
+
+        awardRepository.delete(award);
+    }
 }
