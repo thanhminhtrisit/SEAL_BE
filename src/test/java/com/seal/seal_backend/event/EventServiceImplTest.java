@@ -49,6 +49,7 @@ class EventServiceImplTest {
     @Mock JudgeAssignmentRepository judgeAssignmentRepository;
     @Mock EventBudgetRepository eventBudgetRepository;
     @Mock TeamRepository teamRepository;
+    @Mock SubmissionRepository submissionRepository;
     @Mock CategoryResourceRepository categoryResourceRepository;
     @Mock CapacityService capacityService;
     @Mock AuditPublisher auditPublisher;
