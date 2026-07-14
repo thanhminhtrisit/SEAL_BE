@@ -929,7 +929,7 @@ END$$
                 (id, email, password_hash, full_name, phone, primary_role_id, account_type,
                  student_id, university, is_fpt_student, status, approved_by, approved_at)
                 VALUES
-                    (1, 'admin@seal.local', '$2a$10$replace_with_real_bcrypt_hash_admin', 'System Admin', '0900000001', 1, 'STAFF', NULL, 'FPT University HCMC', FALSE, 'ACTIVE', NULL, CURRENT_TIMESTAMP),
+                        (1, 'admin@seal.local', '$2a$10$replace_with_real_bcrypt_hash_admin', 'System Admin', '0900000001', 1, 'STAFF', NULL, 'FPT University HCMC', FALSE, 'ACTIVE', NULL, CURRENT_TIMESTAMP),
                     (2, 'super@seal.local', '$2a$10$replace_with_real_bcrypt_hash_super', 'Super Coordinator', '0900000002', 2, 'STAFF', NULL, 'FPT University HCMC', FALSE, 'ACTIVE', 1, CURRENT_TIMESTAMP),
                     (3, 'coord@seal.local', '$2a$10$replace_with_real_bcrypt_hash_coord', 'Event Coordinator', '0900000003', 3, 'STAFF', NULL, 'FPT University HCMC', FALSE, 'ACTIVE', 1, CURRENT_TIMESTAMP),
                     (4, 'judge.internal@seal.local', '$2a$10$replace_with_real_bcrypt_hash_judge', 'Internal Judge', '0900000004', 4, 'STAFF', NULL, 'FPT University HCMC', FALSE, 'ACTIVE', 1, CURRENT_TIMESTAMP),

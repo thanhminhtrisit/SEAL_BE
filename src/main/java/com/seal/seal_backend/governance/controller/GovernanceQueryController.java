@@ -21,10 +21,11 @@ public class GovernanceQueryController {
 
     @GetMapping("/api/disciplines")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "List active disciplines",
-               description = "Returns all disciplines with is_active = true, ordered by name.")
-    public ApiResponse<List<DisciplineResponse>> listDisciplines() {
-        return ApiResponse.ok(governanceQueryService.listActiveDisciplines());
+    @Operation(summary = "List disciplines",
+               description = "Active only by default; pass includeInactive=true (Super-Coordinator management) to include inactive ones.")
+    public ApiResponse<List<DisciplineResponse>> listDisciplines(
+            @RequestParam(required = false, defaultValue = "false") boolean includeInactive) {
+        return ApiResponse.ok(governanceQueryService.listDisciplines(includeInactive));
     }
 
     @GetMapping("/api/term-plans")

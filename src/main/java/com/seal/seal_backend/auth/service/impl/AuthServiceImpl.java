@@ -33,6 +33,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 @Service
@@ -54,6 +56,7 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public RegisterResponse register(RegisterRequest req) {
         validatePasswordStrength(req.password());
+        validatePhone(req.phone());
         validateStudentFields(req);
 
         return userRepository.findByEmail(req.email())
@@ -406,20 +409,66 @@ public class AuthServiceImpl implements AuthService {
 
     private void validateStudentFields(RegisterRequest req) {
         if (req.fptStudent()) {
-            if (!hasText(req.studentId())) {
-                throw new BusinessRuleException("BR-USR-03", "FPT students must provide a student ID.");
+            // BR-USR-03: FPT student must give a VALID FPT code (2-letter major prefix + 6 digits, e.g. SE150001).
+            // Fixed: previously used '&&' so a non-blank-but-invalid code like "1" slipped through.
+            if (!isValidStudentCode(req.studentId())) {
+                throw new BusinessRuleException("BR-USR-03",
+                        "FPT students must provide a valid FPT student code (2 letters + 6 digits, e.g. SE150001).");
             }
         } else {
             if (!hasText(req.studentId())) {
                 throw new BusinessRuleException("BR-USR-03", "External participants must provide a student ID.");
             }
-            if (!hasText(req.university())) {
-                throw new BusinessRuleException("BR-USR-03", "External participants must provide a university name.");
+            if (!EXTERNAL_CODE_PATTERN.matcher(req.studentId().trim()).matches()) {
+                throw new BusinessRuleException("BR-USR-03",
+                        "Student ID is invalid (expected 5–20 letters or digits).");
             }
+            if (!hasText(req.university()) || req.university().trim().length() < 2) {
+                throw new BusinessRuleException("BR-USR-03",
+                        "External participants must provide a valid university name.");
+            }
+        }
+    }
+
+    private void validatePhone(String phone) {
+        // Optional field — but if provided it must be a real VN phone number (reject junk like "1").
+        if (hasText(phone) && !PHONE_PATTERN.matcher(phone.trim()).matches()) {
+            throw new BusinessRuleException("BR-USR-01",
+                    "Phone number is invalid (10 digits starting with 0, or +84 followed by 9 digits).");
         }
     }
 
     private boolean hasText(String s) {
         return s != null && !s.isBlank();
+    }
+
+    private static final Pattern FPT_CODE_PATTERN = Pattern.compile("^[A-Z]{2}\\d{6}$");
+    private static final Pattern EXTERNAL_CODE_PATTERN = Pattern.compile("^[A-Za-z0-9]{5,20}$");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^(0\\d{9}|\\+84\\d{9})$");
+
+    private static final Set<String> VALID_PREFIXES = Set.of(
+            // Công nghệ thông tin
+            "SE", "IA", "IS", "AI", "DE",
+
+            // Kinh tế và quản trị kinh doanh
+            "SB", "SS", "SA", "FI",
+
+            // Ngôn ngữ và đồ họa
+            "GD", "MC", "LE", "LJ", "LK", "LC",
+
+            // Mã đặc biệt và kỹ thuật
+            "HE", "HS", "CE", "ME"
+    );
+
+    private boolean isValidStudentCode(String code) {
+        if (!hasText(code)) {
+            return false;
+        }
+        String normalizedCode = code.trim().toUpperCase(Locale.ROOT);
+        // Must be exactly 2 letters + 6 digits AND start with a known FPT major prefix.
+        if (!FPT_CODE_PATTERN.matcher(normalizedCode).matches()) {
+            return false;
+        }
+        return VALID_PREFIXES.contains(normalizedCode.substring(0, 2));
     }
 }

@@ -23,11 +23,11 @@ public class GovernanceQueryServiceImpl implements GovernanceQueryService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<DisciplineResponse> listActiveDisciplines() {
-        return disciplineRepository.findByIsActiveTrueOrderByNameAsc()
-                .stream()
-                .map(DisciplineResponse::from)
-                .toList();
+    public List<DisciplineResponse> listDisciplines(boolean includeInactive) {
+        var list = includeInactive
+                ? disciplineRepository.findByOrderByNameAsc()
+                : disciplineRepository.findByIsActiveTrueOrderByNameAsc();
+        return list.stream().map(DisciplineResponse::from).toList();
     }
 
     @Override

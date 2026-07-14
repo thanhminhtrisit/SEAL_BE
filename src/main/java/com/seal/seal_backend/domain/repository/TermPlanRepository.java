@@ -1,6 +1,7 @@
 package com.seal.seal_backend.domain.repository;
 
 import com.seal.seal_backend.domain.entity.TermPlan;
+import com.seal.seal_backend.domain.enums.TermType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,4 +18,6 @@ public interface TermPlanRepository extends JpaRepository<TermPlan, Long> {
            "ORDER BY tp.year DESC, tp.term ASC")
     List<TermPlan> findByOptionalFilters(@Param("disciplineId") Long disciplineId,
                                          @Param("year") Integer year);
+
+    boolean existsByTermAndYearAndDiscipline_Id(TermType term, Integer year, Long disciplineId);
 }

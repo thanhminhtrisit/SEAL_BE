@@ -6,6 +6,6 @@ import com.seal.seal_backend.governance.dto.response.TermPlanResponse;
 import java.util.List;
 
 public interface GovernanceQueryService {
-    List<DisciplineResponse> listActiveDisciplines();
+    List<DisciplineResponse> listDisciplines(boolean includeInactive);
     List<TermPlanResponse> listTermPlans(Long disciplineId, Integer year);
 }

@@ -9,4 +9,6 @@ import java.util.List;
 @Repository
 public interface DisciplineRepository extends JpaRepository<Discipline, Long> {
     List<Discipline> findByIsActiveTrueOrderByNameAsc();
+    List<Discipline> findByOrderByNameAsc();
+    boolean existsByCode(String code);
 }
