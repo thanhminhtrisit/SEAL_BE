@@ -39,6 +39,7 @@ public class SecurityConfig {
             "/api/auth/google",    // GIS ID-token sign-in — token is verified inside GoogleTokenVerifier
             "/api/auth/ping",
             "/api/*/ping",         // allow all module ping endpoints during parallel dev
+            "/api/public/**",      // public landing page data (stats + open events) — no sensitive data
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/api-docs/**",

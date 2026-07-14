@@ -109,7 +109,9 @@ public class TeamServiceImpl implements TeamService {
         List<Team> teams = status == null
                 ? teamRepository.findByEventIdOrderByCreatedAtAsc(eventId)
                 : teamRepository.findByEventIdAndStatusOrderByCreatedAtAsc(eventId, status);
-        return teams.stream().map(TeamSummaryResponse::from).toList();
+        return teams.stream()
+                .map(t -> TeamSummaryResponse.from(t, teamMemberRepository.countActiveByTeamId(t.getId())))
+                .toList();
     }
 
     // ─── FR-TEAM-03: Invite member ────────────────────────────────────────────
