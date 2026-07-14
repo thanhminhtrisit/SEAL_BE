@@ -321,8 +321,10 @@ public class RankingServiceImpl implements RankingService {
     @Transactional(readOnly = true)
     public List<ScoreBreakdownResponse> getScoreBreakdown(Long teamId, Long roundId) {
         log.info("Truy xuất chi tiết bảng điểm DTO (Score Breakdown) cho Team ID: {} tại Round ID: {}", teamId, roundId);
+
         String sql = "SELECT u.full_name AS judgeName, sc.name AS criterionName, sc.weight AS criterionWeight, " +
-                "s.score_value AS scoreValue, s.comment AS judgeComment " +
+                "s.score_value AS scoreValue, s.comment AS judgeComment, " +
+                "e.general_comment AS generalComment " +
                 "FROM scores s " +
                 "JOIN evaluations e ON s.evaluation_id = e.id " +
                 "JOIN submissions sub ON e.submission_id = sub.id " +

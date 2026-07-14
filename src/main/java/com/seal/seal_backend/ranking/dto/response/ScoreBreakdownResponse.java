@@ -5,5 +5,6 @@ public record ScoreBreakdownResponse(
         String criterionName,
         Double criterionWeight,
         Double scoreValue,
-        String judgeComment
+        String judgeComment,
+        String generalComment
 ) {}
