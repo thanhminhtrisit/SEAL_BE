@@ -11,6 +11,7 @@ import com.seal.seal_backend.domain.enums.AssignmentStatus;
 import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.domain.enums.EventType;
 import com.seal.seal_backend.domain.enums.RoundStatus;
+import com.seal.seal_backend.domain.enums.SubmissionStatus;
 import com.seal.seal_backend.domain.repository.*;
 import com.seal.seal_backend.event.dto.request.*;
 import com.seal.seal_backend.domain.repository.TeamRepository;
@@ -40,6 +41,7 @@ public class EventServiceImpl implements EventService {
     private final JudgeAssignmentRepository judgeAssignmentRepository;
     private final EventBudgetRepository eventBudgetRepository;
     private final TeamRepository teamRepository;
+    private final SubmissionRepository submissionRepository;
     private final CategoryResourceRepository categoryResourceRepository;
     private final CapacityService capacityService;
     private final AuditPublisher auditPublisher;
@@ -867,9 +869,13 @@ public class EventServiceImpl implements EventService {
     public RoundResponse lockRoundScoring(Long eventId, Long roundId, Long coordinatorId) {
         Event event = findEvent(eventId);
         Round round = findRound(roundId, eventId);
-        return transitionRoundStatus(event, round, coordinatorId,
+        RoundResponse response = transitionRoundStatus(event, round, coordinatorId,
                 RoundStatus.SCORING_OPEN, RoundStatus.SCORING_LOCKED,
                 AuditAction.ROUND_LOCKED, null);
+        // BR-SUB / lifecycle: freeze the round's submissions so they are read-only once scoring is locked.
+        submissionRepository.bulkUpdateStatusByRound(
+                roundId, SubmissionStatus.SUBMITTED, SubmissionStatus.LOCKED);
+        return response;
     }
 
     /** BR-SCR-05: unlock is the ONLY controlled way to change scores after lock — reason is mandatory. */
@@ -882,9 +888,13 @@ public class EventServiceImpl implements EventService {
         }
         Event event = findEvent(eventId);
         Round round = findRound(roundId, eventId);
-        return transitionRoundStatus(event, round, coordinatorId,
+        RoundResponse response = transitionRoundStatus(event, round, coordinatorId,
                 RoundStatus.SCORING_LOCKED, RoundStatus.SCORING_OPEN,
                 AuditAction.ROUND_UNLOCKED, reason);
+        // Re-open the frozen submissions so re-scoring after an audited unlock works.
+        submissionRepository.bulkUpdateStatusByRound(
+                roundId, SubmissionStatus.LOCKED, SubmissionStatus.SUBMITTED);
+        return response;
     }
 
     @Override

@@ -52,7 +52,7 @@ public class SubmissionServiceImpl implements SubmissionService {
 
         validateTeamAndRound(team, round);
         validateTeamCanSubmit(team);
-        validateRoundOpenForSubmission(round);
+        enforceSubmissionWindow(team, round, actor, request);
         validateTeamLeader(team.getId(), actor.getId());
         validatePromotedIfRankingExists(team, round);
         validateSubmissionArtifacts(round, request);
@@ -82,8 +82,9 @@ public class SubmissionServiceImpl implements SubmissionService {
         validateCanViewTeam(teamId, actorUserId, staffViewer);
 
         Submission submission = submissionRepository
-                .findFirstByTeamIdAndRoundIdAndStatusOrderByAttemptNumberDesc(
-                        teamId, roundId, SubmissionStatus.SUBMITTED)
+                .findFirstByTeamIdAndRoundIdAndStatusInOrderByAttemptNumberDesc(
+                        teamId, roundId,
+                        List.of(SubmissionStatus.SUBMITTED, SubmissionStatus.LOCKED))
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Submission not found for team " + teamId + " and round " + roundId));
 
@@ -141,7 +142,9 @@ public class SubmissionServiceImpl implements SubmissionService {
                 for (Submission candidate : submissionsByTeamId.getOrDefault(team.getId(), List.of())) {
                     Long candidateRoundId = candidate.getRound().getId();
                     Submission current = currentByRound.get(candidateRoundId);
-                    if (candidate.getStatus() == SubmissionStatus.SUBMITTED
+                    boolean isActiveStatus = candidate.getStatus() == SubmissionStatus.SUBMITTED
+                            || candidate.getStatus() == SubmissionStatus.LOCKED;
+                    if (isActiveStatus
                             && (current == null
                             || candidate.getAttemptNumber() > current.getAttemptNumber())) {
                         currentByRound.put(candidateRoundId, candidate);
@@ -214,13 +217,23 @@ public class SubmissionServiceImpl implements SubmissionService {
         }
     }
 
-    private void validateRoundOpenForSubmission(Round round) {
+    private void enforceSubmissionWindow(
+            Team team, Round round, User actor, CreateSubmissionRequestDTO request) {
         if (round.getStatus() != RoundStatus.OPEN_FOR_SUBMISSION) {
             throw new BusinessRuleException("BR-SUB-01", "Round is not open for submission");
         }
         if (round.getSubmissionDeadline() != null
                 && LocalDateTime.now().isAfter(round.getSubmissionDeadline())) {
-            throw new BusinessRuleException("BR-SUB-01", "Submission deadline has passed");
+            // BR-SUB-01: keep a LATE_REJECTED record (own transaction) for audit/history, then reject.
+            int attemptNumber =
+                    submissionRepository.findMaxAttemptNumber(team.getId(), round.getId()) + 1;
+            submissionRepository.recordLateRejectedAttempt(
+                    team.getId(), round.getId(), actor.getId(), attemptNumber,
+                    trimToNull(request.getRepoUrl()), trimToNull(request.getDemoUrl()),
+                    trimToNull(request.getSlideUrl()), trimToNull(request.getReportUrl()),
+                    trimToNull(request.getChangeNote()));
+            throw new BusinessRuleException("BR-SUB-01",
+                    "Submission deadline has passed; the attempt was recorded as LATE_REJECTED and not accepted.");
         }
     }
 

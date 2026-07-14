@@ -113,7 +113,9 @@ public class AuthServiceImpl implements AuthService {
         User saved = userRepository.save(user);
 
         if (autoApprove) {
-            auditPublisher.log(saved, AuditAction.ACCOUNT_AUTO_APPROVED, "USER", saved.getId(),
+            // Same-transaction audit: actor row was just inserted above and is still
+            // uncommitted — a REQUIRES_NEW insert would deadlock on the FK (MySQL 1205).
+            auditPublisher.logInSameTransaction(saved, AuditAction.ACCOUNT_AUTO_APPROVED, "USER", saved.getId(),
                     null, "{\"status\":\"ACTIVE\"}",
                     "AUTO_APPROVE_ACCOUNTS=true — registration passed BR-USR-03/05 validation", null);
             return RegisterResponse.active(saved.getId());
@@ -247,7 +249,9 @@ public class AuthServiceImpl implements AuthService {
         User saved = userRepository.save(user);
 
         if (autoApprove) {
-            auditPublisher.log(saved, AuditAction.ACCOUNT_AUTO_APPROVED, "USER", saved.getId(),
+            // Same-transaction audit — see createNew(): REQUIRES_NEW would deadlock on the
+            // FK to the just-inserted (uncommitted) actor row.
+            auditPublisher.logInSameTransaction(saved, AuditAction.ACCOUNT_AUTO_APPROVED, "USER", saved.getId(),
                     null, "{\"status\":\"ACTIVE\"}",
                     "AUTO_APPROVE_ACCOUNTS=true — Google-verified email", null);
         }

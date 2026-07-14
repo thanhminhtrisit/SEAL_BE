@@ -327,11 +327,16 @@ class SubmissionServiceImplTest {
     @Test
     void submitAfterDeadlineIsRejected() {
         round.setSubmissionDeadline(LocalDateTime.now().minusMinutes(1));
+        when(submissionRepository.findMaxAttemptNumber(1L, 2L)).thenReturn(0);
 
         assertThatThrownBy(() -> service.createSubmission(
                 request("https://github.com/team/late"), 7L))
                 .isInstanceOf(BusinessRuleException.class)
                 .hasMessageContaining("deadline");
+        // Rejected, but the late attempt is recorded (own tx) for audit/history — not an accepted save.
+        verify(submissionRepository).recordLateRejectedAttempt(
+                eq(1L), eq(2L), eq(7L), eq(1),
+                any(), any(), any(), any(), any());
         verify(submissionRepository, never()).save(any());
     }
 

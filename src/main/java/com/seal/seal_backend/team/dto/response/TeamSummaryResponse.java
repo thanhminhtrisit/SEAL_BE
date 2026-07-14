@@ -9,15 +9,17 @@ public record TeamSummaryResponse(
         Long categoryId,
         String categoryName,
         String name,
-        TeamStatus status
+        TeamStatus status,
+        Integer memberCount
 ) {
-    public static TeamSummaryResponse from(Team t) {
+    public static TeamSummaryResponse from(Team t, long memberCount) {
         return new TeamSummaryResponse(
                 t.getId(),
                 t.getEvent().getId(),
                 t.getCategory().getId(),
                 t.getCategory().getName(),
                 t.getName(),
-                t.getStatus());
+                t.getStatus(),
+                (int) memberCount);
     }
 }
