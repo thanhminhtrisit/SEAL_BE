@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 public interface EvaluationRepository extends JpaRepository<Evaluation, Long> {
@@ -35,4 +36,7 @@ public interface EvaluationRepository extends JpaRepository<Evaluation, Long> {
             @Param("judgeId") Long judgeId,
             @Param("evaluationIds") Collection<Long> evaluationIds
     );
+
+    @Query("SELECT e FROM Evaluation e WHERE e.judge.id = :judgeId AND e.submission.id IN :submissionIds")
+    List<Evaluation> findByJudgeIdAndSubmissionIdIn(Long judgeId, Set<Long> submissionIds);
 }

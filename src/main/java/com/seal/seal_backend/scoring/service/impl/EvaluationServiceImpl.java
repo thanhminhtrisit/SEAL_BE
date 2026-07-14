@@ -67,12 +67,13 @@ public class EvaluationServiceImpl implements EvaluationService {
 
         Set<Long> roundIds = assignments.stream()
                 .map(assignment -> assignment.getRound().getId())
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
 
-        Map<Long, List<ScoringCriterion>> activeCriteriaByRound = new java.util.HashMap<>();
-        for (Long roundId : roundIds) {
-            activeCriteriaByRound.put(roundId, findActiveCriteriaForRound(roundId));
-        }
+        // ĐÃ TỐI ƯU 1: Lấy tất cả Criteria bằng 1 Query duy nhất
+        Map<Long, List<ScoringCriterion>> activeCriteriaByRound = scoringCriterionRepository
+                .findByCriteriaSet_Round_IdInAndIsActiveTrueOrderByDisplayOrderAsc(roundIds)
+                .stream()
+                .collect(Collectors.groupingBy(criterion -> criterion.getCriteriaSet().getRound().getId()));
 
         Map<String, Submission> latestSubmitted = new LinkedHashMap<>();
         for (Submission submission : submissionRepository.findSubmittedByRoundIds(roundIds, SubmissionStatus.SUBMITTED)) {
@@ -80,24 +81,33 @@ public class EvaluationServiceImpl implements EvaluationService {
             latestSubmitted.putIfAbsent(key, submission);
         }
 
+        if (latestSubmitted.isEmpty()) return List.of();
+
+        // ĐÃ TỐI ƯU 2: Lấy tất cả Evaluation và Score bằng 2 Query duy nhất
+        Set<Long> submissionIds = latestSubmitted.values().stream().map(Submission::getId).collect(Collectors.toSet());
+
+        Map<Long, Evaluation> evaluationMap = evaluationRepository
+                .findByJudgeIdAndSubmissionIdIn(judge.getId(), submissionIds)
+                .stream()
+                .collect(Collectors.toMap(e -> e.getSubmission().getId(), e -> e));
+
+        Set<Long> evaluationIds = evaluationMap.values().stream().map(Evaluation::getId).collect(Collectors.toSet());
+
+        Map<Long, Long> scoredCountMap = evaluationIds.isEmpty() ? Map.of() : scoreRepository
+                .findByEvaluationIdIn(evaluationIds)
+                .stream()
+                .collect(Collectors.groupingBy(score -> score.getEvaluation().getId(), Collectors.counting()));
+
+        // Ráp dữ liệu
         List<JudgeAssignedSubmissionResponse> responses = new ArrayList<>();
         for (Submission submission : latestSubmitted.values()) {
             if (!isSubmissionCoveredByAssignments(submission, assignments)) {
                 continue;
             }
 
-            Evaluation evaluation = evaluationRepository
-                    .findByJudge_IdAndSubmission_IdAndRound_Id(
-                            judge.getId(),
-                            submission.getId(),
-                            submission.getRound().getId()
-                    )
-                    .orElse(null);
-
+            Evaluation evaluation = evaluationMap.get(submission.getId());
             int totalCriteriaCount = activeCriteriaByRound.getOrDefault(submission.getRound().getId(), List.of()).size();
-            int scoredCriteriaCount = evaluation == null
-                    ? 0
-                    : scoreRepository.findByEvaluation_IdOrderByCriterion_DisplayOrderAsc(evaluation.getId()).size();
+            long scoredCriteriaCount = evaluation == null ? 0 : scoredCountMap.getOrDefault(evaluation.getId(), 0L);
 
             responses.add(JudgeAssignedSubmissionResponse.builder()
                     .submissionId(submission.getId())
@@ -118,7 +128,7 @@ public class EvaluationServiceImpl implements EvaluationService {
                     .reportUrl(submission.getReportUrl())
                     .evaluationId(evaluation != null ? evaluation.getId() : null)
                     .evaluationStatus(evaluation != null ? evaluation.getStatus().name() : "NOT_STARTED")
-                    .scoredCriteriaCount(scoredCriteriaCount)
+                    .scoredCriteriaCount((int) scoredCriteriaCount)
                     .totalCriteriaCount(totalCriteriaCount)
                     .build());
         }
@@ -266,10 +276,13 @@ public class EvaluationServiceImpl implements EvaluationService {
 
         Map<Long, ScoringCriterion> criterionMap = activeCriteria
                 .stream()
-                .collect(java.util.stream.Collectors.toMap(
-                        ScoringCriterion::getId,
-                        criterion -> criterion
-                ));
+                .collect(Collectors.toMap(ScoringCriterion::getId, criterion -> criterion));
+
+        // ĐÃ TỐI ƯU: Bốc sẵn toàn bộ Score của phiếu chấm này lên RAM, không cho Query lặp lại
+        Map<Long, Score> existingScoresMap = scoreRepository
+                .findByEvaluation_IdOrderByCriterion_DisplayOrderAsc(evaluation.getId())
+                .stream()
+                .collect(Collectors.toMap(s -> s.getCriterion().getId(), s -> s));
 
         for (ScoreItemRequest item : request.getScores()) {
             ScoringCriterion criterion = criterionMap.get(item.getCriterionId());
@@ -282,9 +295,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 
             validateScoreValue(item.getScoreValue(), criterion);
 
-            Score existingScore = scoreRepository
-                    .findByEvaluation_IdAndCriterion_Id(evaluation.getId(), criterion.getId())
-                    .orElse(null);
+            // Kiểm tra điểm tồn tại trực tiếp từ Map trên RAM
+            Score existingScore = existingScoresMap.get(criterion.getId());
 
             boolean created = existingScore == null;
             BigDecimal oldScoreValue = created ? null : existingScore.getScoreValue();

@@ -35,4 +35,7 @@ public interface AwardService {
 
     // Lấy kết quả cá nhân cho thí sinh
     ParticipantResultResponse getParticipantResult(Long eventId, Long userId);
+
+    @Transactional
+    void deleteAward(Long awardId, Long userId);
 }
