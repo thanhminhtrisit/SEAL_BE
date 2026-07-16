@@ -8,6 +8,7 @@ import com.seal.seal_backend.common.api.ApiResponse;
 import com.seal.seal_backend.common.security.CurrentUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -32,7 +33,7 @@ public class AdminSettingsController {
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Enable/disable auto-approval of newly registered accounts")
     public ApiResponse<AutoApproveResponse> setAutoApprove(
-            @RequestBody AutoApproveRequest req, @CurrentUser UserPrincipal user) {
+            @Valid @RequestBody AutoApproveRequest req, @CurrentUser UserPrincipal user) {
         return ApiResponse.ok(new AutoApproveResponse(
                 adminSettingsService.setAutoApprove(req.enabled(), user.getId())));
     }

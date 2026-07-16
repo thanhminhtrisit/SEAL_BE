@@ -12,6 +12,7 @@ import com.seal.seal_backend.auth.dto.response.RegisterResponse;
 import com.seal.seal_backend.auth.security.GoogleTokenVerifier;
 import com.seal.seal_backend.auth.security.JwtTokenProvider;
 import com.seal.seal_backend.auth.security.UserPrincipal;
+import com.seal.seal_backend.admin.service.AdminSettingsService;
 import com.seal.seal_backend.auth.service.AuthService;
 import com.seal.seal_backend.common.api.PageResponse;
 import com.seal.seal_backend.common.audit.AuditAction;
@@ -23,7 +24,6 @@ import com.seal.seal_backend.domain.entity.User;
 import com.seal.seal_backend.domain.enums.AccountType;
 import com.seal.seal_backend.domain.enums.UserStatus;
 import com.seal.seal_backend.domain.repository.RoleRepository;
-import com.seal.seal_backend.domain.repository.SystemConfigRepository;
 import com.seal.seal_backend.domain.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -50,7 +50,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final AuditPublisher auditPublisher;
     private final GoogleTokenVerifier googleTokenVerifier;
-    private final SystemConfigRepository systemConfigRepository;
+    private final AdminSettingsService adminSettingsService;
 
     @Override
     @Transactional
@@ -74,7 +74,7 @@ public class AuthServiceImpl implements AuthService {
         String oldJson = "{\"status\":\"REJECTED\"}";
         existing.setFullName(req.fullName());
         existing.setPhone(req.phone());
-        existing.setStudentId(req.studentId());
+        existing.setStudentId(normalizeStudentId(req));
         existing.setUniversity(req.university());
         existing.setIsFptStudent(req.fptStudent());
         existing.setPasswordHash(passwordEncoder.encode(req.password()));
@@ -99,7 +99,7 @@ public class AuthServiceImpl implements AuthService {
         user.setFullName(req.fullName());
         user.setPhone(req.phone());
         user.setIsFptStudent(req.fptStudent());
-        user.setStudentId(req.studentId());
+        user.setStudentId(normalizeStudentId(req));
         user.setUniversity(req.university());
         user.setAccountType(AccountType.PARTICIPANT);
         user.setPrimaryRole(teamMemberRole);
@@ -128,13 +128,11 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * Governance flag (system_configs.AUTO_APPROVE_ACCOUNTS). Absent or anything but "true"
-     * = manual coordinator approval (original FR-AUTH-08 behaviour). Flip the row to 'true'
-     * to enable auto-approval — no deploy needed, and it can be turned off the same way.
+     * = manual coordinator approval (original FR-AUTH-08 behaviour). Delegates to
+     * {@link AdminSettingsService} so registration and the admin toggle read one source of truth.
      */
     private boolean isAutoApproveEnabled() {
-        return systemConfigRepository.findByConfigKey("AUTO_APPROVE_ACCOUNTS")
-                .map(c -> c.getConfigValue() != null && "true".equalsIgnoreCase(c.getConfigValue().trim()))
-                .orElse(false);
+        return adminSettingsService.isAutoApproveEnabled();
     }
 
     @Override
@@ -459,6 +457,19 @@ public class AuthServiceImpl implements AuthService {
             // Mã đặc biệt và kỹ thuật
             "HE", "HS", "CE", "ME"
     );
+
+    /**
+     * FPT codes are validated case-insensitively (see {@link #isValidStudentCode}) but were being
+     * stored raw, so "se150001" persisted lowercase. Store the canonical upper-case form for FPT
+     * students; external IDs are left as the participant typed them.
+     */
+    private String normalizeStudentId(RegisterRequest req) {
+        String raw = req.studentId();
+        if (req.fptStudent() && raw != null) {
+            return raw.trim().toUpperCase(Locale.ROOT);
+        }
+        return raw;
+    }
 
     private boolean isValidStudentCode(String code) {
         if (!hasText(code)) {

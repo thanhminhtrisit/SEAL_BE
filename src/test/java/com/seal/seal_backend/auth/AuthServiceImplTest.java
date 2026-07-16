@@ -11,6 +11,7 @@ import com.seal.seal_backend.auth.dto.response.RegisterResponse;
 import com.seal.seal_backend.auth.security.GoogleTokenVerifier;
 import com.seal.seal_backend.auth.security.JwtTokenProvider;
 import com.seal.seal_backend.auth.security.UserPrincipal;
+import com.seal.seal_backend.admin.service.AdminSettingsService;
 import com.seal.seal_backend.auth.service.impl.AuthServiceImpl;
 import com.seal.seal_backend.common.api.PageResponse;
 import com.seal.seal_backend.common.audit.AuditAction;
@@ -19,12 +20,10 @@ import com.seal.seal_backend.auth.dto.response.MeResponse;
 import com.seal.seal_backend.common.exception.BusinessRuleException;
 import com.seal.seal_backend.common.exception.ResourceNotFoundException;
 import com.seal.seal_backend.domain.entity.Role;
-import com.seal.seal_backend.domain.entity.SystemConfig;
 import com.seal.seal_backend.domain.entity.User;
 import com.seal.seal_backend.domain.enums.AccountType;
 import com.seal.seal_backend.domain.enums.UserStatus;
 import com.seal.seal_backend.domain.repository.RoleRepository;
-import com.seal.seal_backend.domain.repository.SystemConfigRepository;
 import com.seal.seal_backend.domain.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -55,7 +54,7 @@ class AuthServiceImplTest {
     @Mock JwtTokenProvider jwtTokenProvider;
     @Mock AuditPublisher auditPublisher;
     @Mock GoogleTokenVerifier googleTokenVerifier;
-    @Mock SystemConfigRepository systemConfigRepository;
+    @Mock AdminSettingsService adminSettingsService;
 
     @InjectMocks AuthServiceImpl authService;
 
@@ -133,6 +132,20 @@ class AuthServiceImplTest {
             assertThat(res.status()).isEqualTo("PENDING");
             verify(userRepository).save(argThat(u ->
                     u.getStatus() == UserStatus.PENDING && u.getPrimaryRole() == teamMemberRole));
+        }
+
+        @Test
+        void newEmail_fptStudent_lowercaseCode_isStoredUppercased() {
+            when(userRepository.findByEmail(any())).thenReturn(Optional.empty());
+            when(roleRepository.findByCode("TEAM_MEMBER")).thenReturn(Optional.of(teamMemberRole));
+            when(passwordEncoder.encode(any())).thenReturn("$2a$10$hashed");
+            when(userRepository.save(any())).thenReturn(savedUser(50L, UserStatus.PENDING));
+
+            RegisterRequest req = new RegisterRequest(
+                    "lc@student.local", "Password1", "Lower Case", null, true, "se150001", null);
+            authService.register(req);
+
+            verify(userRepository).save(argThat(u -> "SE150001".equals(u.getStudentId())));
         }
 
         @Test
@@ -303,12 +316,9 @@ class AuthServiceImplTest {
     @Nested
     class AutoApprove {
 
+        // AuthService now reads the flag through AdminSettingsService (single config source of truth).
         private void stubFlagOn() {
-            SystemConfig cfg = new SystemConfig();
-            cfg.setConfigKey("AUTO_APPROVE_ACCOUNTS");
-            cfg.setConfigValue("true");
-            when(systemConfigRepository.findByConfigKey("AUTO_APPROVE_ACCOUNTS"))
-                    .thenReturn(Optional.of(cfg));
+            when(adminSettingsService.isAutoApproveEnabled()).thenReturn(true);
         }
 
         @Test
@@ -348,7 +358,7 @@ class AuthServiceImplTest {
 
             assertThat(res.status()).isEqualTo("PENDING");
             // Reactivation path must not even consult the flag
-            verify(systemConfigRepository, never()).findByConfigKey(any());
+            verify(adminSettingsService, never()).isAutoApproveEnabled();
         }
 
         @Test

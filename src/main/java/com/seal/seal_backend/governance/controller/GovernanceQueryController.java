@@ -20,9 +20,11 @@ public class GovernanceQueryController {
     private final GovernanceQueryService governanceQueryService;
 
     @GetMapping("/api/disciplines")
-    @PreAuthorize("isAuthenticated()")
+    // includeInactive exposes admin-only (deactivated) disciplines → gate it to SUPER_COORDINATOR;
+    // plain authenticated users may only read the active list (includeInactive=false).
+    @PreAuthorize("isAuthenticated() and (!#includeInactive or hasRole('SUPER_COORDINATOR'))")
     @Operation(summary = "List disciplines",
-               description = "Active only by default; pass includeInactive=true (Super-Coordinator management) to include inactive ones.")
+               description = "Active only by default; pass includeInactive=true (Super-Coordinator only) to include inactive ones.")
     public ApiResponse<List<DisciplineResponse>> listDisciplines(
             @RequestParam(required = false, defaultValue = "false") boolean includeInactive) {
         return ApiResponse.ok(governanceQueryService.listDisciplines(includeInactive));

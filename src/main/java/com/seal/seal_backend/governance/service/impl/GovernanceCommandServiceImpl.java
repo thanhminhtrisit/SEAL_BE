@@ -18,6 +18,7 @@ import com.seal.seal_backend.governance.dto.response.DisciplineResponse;
 import com.seal.seal_backend.governance.dto.response.TermPlanResponse;
 import com.seal.seal_backend.governance.service.GovernanceCommandService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,7 +48,12 @@ public class GovernanceCommandServiceImpl implements GovernanceCommandService {
         d.setDescription(req.description());
         d.setIsActive(true);
         d.setCreatedBy(userRepository.getReferenceById(actorId));
-        return DisciplineResponse.from(disciplineRepository.save(d));
+        try {
+            return DisciplineResponse.from(disciplineRepository.save(d));
+        } catch (DataIntegrityViolationException ex) {
+            // Lost a race on the uq_disciplines_code unique constraint → 409, not 500.
+            throw new BusinessRuleException("FR-GOV-01", "Discipline code already exists: " + code);
+        }
     }
 
     @Override
@@ -95,7 +101,13 @@ public class GovernanceCommandServiceImpl implements GovernanceCommandService {
         tp.setDiscipline(d);
         tp.setMaxEvents(max);
         tp.setCreatedBy(userRepository.getReferenceById(actorId));
-        return TermPlanResponse.from(termPlanRepository.save(tp), 0L);
+        try {
+            return TermPlanResponse.from(termPlanRepository.save(tp), 0L);
+        } catch (DataIntegrityViolationException ex) {
+            // Lost a race on uq_term_plans_term_year_discipline → 409, not 500.
+            throw new BusinessRuleException("FR-GOV-02",
+                    "A quota already exists for " + term + " " + req.year() + " / " + d.getName());
+        }
     }
 
     @Override

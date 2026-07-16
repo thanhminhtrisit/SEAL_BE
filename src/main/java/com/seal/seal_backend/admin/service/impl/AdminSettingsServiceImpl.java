@@ -12,7 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AdminSettingsServiceImpl implements AdminSettingsService {
 
-    private static final String KEY = "AUTO_APPROVE_ACCOUNTS";
+    private static final String KEY = AdminSettingsService.AUTO_APPROVE_KEY;
 
     private final SystemConfigRepository systemConfigRepository;
     private final UserRepository userRepository;

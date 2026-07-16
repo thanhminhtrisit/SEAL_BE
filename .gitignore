@@ -53,6 +53,8 @@ build/
 
 ### Claude Code ###
 .claude/
+CLAUDE.md
+./CLAUDE.md
 
 ### VS Code ###
 .vscode/
@@ -68,3 +70,5 @@ Thumbs.db
 
 docs/api-tests/
 docs/M1_BACKEND_SUMMARY_AND_TESTS.md
+docs
+./docs/*
