@@ -55,8 +55,16 @@ public class RankingController {
     @GetMapping("/rounds/{roundId}")
     @Operation(summary = "Xem kết quả xếp hạng của một vòng thi")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<ApiResponse<List<RankingResponse>>> getRankings(@PathVariable Long roundId) {
-        return ResponseEntity.ok(ApiResponse.ok(rankingService.getRankingsByRound(roundId)));
+    public ResponseEntity<ApiResponse<List<RankingResponse>>> getRankings(
+            @PathVariable Long roundId,
+            @CurrentUser UserPrincipal user
+    ) {
+        // Kiểm tra xem user hiện tại có phải là Ban tổ chức không
+        boolean isCoordinator = user.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_COORDINATOR")
+                        || role.getAuthority().equals("ROLE_SUPER_COORDINATOR"));
+
+        return ResponseEntity.ok(ApiResponse.ok(rankingService.getRankingsByRound(roundId, isCoordinator)));
     }
 
     @PostMapping("/teams/{teamId}/disqualify")
@@ -99,9 +107,14 @@ public class RankingController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<List<ScoreBreakdownResponse>>> getScoreBreakdown(
             @PathVariable Long teamId,
-            @PathVariable Long roundId
+            @PathVariable Long roundId,
+            @CurrentUser UserPrincipal user // Bổ sung user
     ) {
-        List<ScoreBreakdownResponse> breakdown = rankingService.getScoreBreakdown(teamId, roundId);
+        boolean isCoordinator = user.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_COORDINATOR")
+                        || role.getAuthority().equals("ROLE_SUPER_COORDINATOR"));
+
+        List<ScoreBreakdownResponse> breakdown = rankingService.getScoreBreakdown(teamId, roundId, isCoordinator);
         return ResponseEntity.ok(ApiResponse.ok(breakdown));
     }
 }

@@ -11,7 +11,7 @@ import java.util.List;
 public interface RankingService {
     List<RankingResponse> computeRankingForRound(Long roundId, Long categoryId, Long userId);
 
-    List<RankingResponse> getRankingsByRound(Long roundId);
+    List<RankingResponse> getRankingsByRound(Long roundId, boolean isCoordinator);
 
     List<CategoryResponse> getCategoriesByEvent(Long eventId);
 
@@ -19,7 +19,7 @@ public interface RankingService {
 
     List<DisqualifiedTeamResponse> getDisqualifiedTeams(Long eventId);
 
-    List<ScoreBreakdownResponse> getScoreBreakdown(Long teamId, Long roundId);
+    List<ScoreBreakdownResponse> getScoreBreakdown(Long teamId, Long roundId,boolean isCoordinator);
 
     // Hàm tự động của hệ thống
     void promoteTeamsToNextRound(Long currentRoundId, List<Long> teamIds);

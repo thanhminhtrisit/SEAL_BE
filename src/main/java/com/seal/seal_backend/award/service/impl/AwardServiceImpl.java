@@ -17,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -206,6 +205,13 @@ public class AwardServiceImpl implements AwardService {
         String sql = "UPDATE events SET status = ? WHERE id = ?";
         jdbcTemplate.update(sql, EventStatus.COMPLETED.name(), eventId);
 
+        // Cập nhật trạng thái vòng
+        String updateRoundsSql = "UPDATE rounds SET status = 'COMPLETED' WHERE event_id = ?";
+        jdbcTemplate.update(updateRoundsSql, eventId);
+
+        // 👇 BỔ SUNG: Lấy tên sự kiện để chèn vào thông báo
+        String eventName = jdbcTemplate.queryForObject("SELECT name FROM events WHERE id = ?", String.class, eventId);
+
         // Lấy danh sách ID của TẤT CẢ các thành viên thuộc các đội tham gia sự kiện này
         String findUsersSql = "SELECT tm.user_id FROM team_members tm " +
                 "JOIN teams t ON tm.team_id = t.id " +
@@ -215,10 +221,11 @@ public class AwardServiceImpl implements AwardService {
 
         // Gắn hàm gửi thông báo chạy ngầm (Sẽ không làm chậm response trả về Frontend)
         if (!participantIds.isEmpty()) {
-            String title = "Kết quả sự kiện đã được công bố!";
-            String message = "Coordinator đã công bố bảng xếp hạng và điểm số chính thức. Hãy vào xem ngay thành tích của đội bạn nhé.";
+            // 👇 CẬP NHẬT: Gắn tên sự kiện vào tiêu đề và nội dung
+            String title = "🏆 Kết quả chung cuộc: " + eventName;
+            String message = "Bảng xếp hạng tổng và các Giải thưởng của sự kiện " + eventName + " đã chính thức lộ diện. Khám phá ngay xem Cúp Vàng thuộc về ai!";
 
-            notificationService.notifyUsersBatch(participantIds, eventId, "RESULT_PUBLISHED", title, message);
+            notificationService.notifyUsersBatch(participantIds, eventId, "EVENT_PUBLISHED", title, message);
         }
     }
 

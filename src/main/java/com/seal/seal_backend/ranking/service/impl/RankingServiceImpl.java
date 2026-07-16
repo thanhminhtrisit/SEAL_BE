@@ -3,6 +3,7 @@ package com.seal.seal_backend.ranking.service.impl;
 import com.seal.seal_backend.domain.entity.*;
 import com.seal.seal_backend.domain.repository.RankingRepository;
 import com.seal.seal_backend.domain.repository.RoundRepository;
+import com.seal.seal_backend.notification.service.NotificationService;
 import com.seal.seal_backend.ranking.dto.response.CategoryResponse;
 import com.seal.seal_backend.ranking.dto.response.RankingResponse;
 import com.seal.seal_backend.ranking.dto.response.DisqualifiedTeamResponse;
@@ -27,6 +28,7 @@ public class RankingServiceImpl implements RankingService {
     private final RankingRepository rankingRepository;
     private final RoundRepository roundRepository;
     private final RankingDataProvider dataProvider;
+    private final NotificationService notificationService;
     private final JdbcTemplate jdbcTemplate;
 
     private static class TeamScoreData {
@@ -49,6 +51,16 @@ public class RankingServiceImpl implements RankingService {
         Round currentRound = roundRepository.findById(roundId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy vòng thi với ID: " + roundId));
 
+        final List<Long> allowedTeamIds;
+        if (currentRound.getOrderNumber() > 1) {
+            String sql = "SELECT r.team_id FROM rankings r " +
+                    "JOIN rounds prev ON r.round_id = prev.id " +
+                    "WHERE prev.event_id = ? AND prev.order_number = ? AND r.is_promoted = true";
+            allowedTeamIds = jdbcTemplate.queryForList(sql, Long.class, currentRound.getEvent().getId(), currentRound.getOrderNumber() - 1);
+        } else {
+            allowedTeamIds = Collections.emptyList();
+        }
+
         List<RankingDataProvider.CriterionView> criteria = dataProvider.getCriteriaForRound(roundId);
         List<RankingDataProvider.ScoreView> allScores = dataProvider.getScoresForRound(roundId);
         validateScoringData(criteria, allScores);
@@ -62,6 +74,8 @@ public class RankingServiceImpl implements RankingService {
                     Long teamCatId = team.categoryId() != null ? team.categoryId() : 0L;
                     return teamCatId.equals(categoryId); // Chỉ lấy team đúng category
                 })
+                // 👇 BƯỚC 2: CHẶN ĐỨNG CÁC ĐỘI ĐÃ "DỪNG BƯỚC"
+                .filter(team -> currentRound.getOrderNumber() == 1 || allowedTeamIds.contains(team.id()))
                 .toList();
 
         if (validTeams.isEmpty()) {
@@ -70,7 +84,6 @@ public class RankingServiceImpl implements RankingService {
         }
 
         List<TeamScoreData> rankedTeamsData = calculateAndSortRankings(validTeams, criteria, allScores);
-
         if (categoryId == null || categoryId == 0) {
             log.info("Xóa toàn bộ bảng xếp hạng cũ của vòng thi: {}", roundId);
             rankingRepository.deleteByRoundId(roundId);
@@ -245,7 +258,15 @@ public class RankingServiceImpl implements RankingService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<RankingResponse> getRankingsByRound(Long roundId) {
+    public List<RankingResponse> getRankingsByRound(Long roundId, boolean isCoordinator) {
+        Round round = roundRepository.findById(roundId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy vòng thi với ID: " + roundId));
+
+        // 🛑 CHỐT CHẶN BẢO MẬT:
+        // Nếu KHÔNG phải là Coordinator VÀ vòng thi chưa COMPLETED thì chặn lại!
+        if (!isCoordinator && !"COMPLETED".equalsIgnoreCase(round.getStatus().name())) {
+            throw new RuntimeException("Kết quả của vòng thi này chưa được công bố!");
+        }
         return rankingRepository.findByRoundIdOrderByRankPositionAsc(roundId)
                 .stream()
                 .map(e -> new RankingResponse(
@@ -265,6 +286,11 @@ public class RankingServiceImpl implements RankingService {
     @Transactional
     public void disqualifyTeam(Long teamId, String reason, Long userId) {
         log.info("Coordinator {} đang tiến hành đình chỉ Team {} với lý do: {}", userId, teamId, reason);
+
+        Long eventId = jdbcTemplate.queryForObject("SELECT event_id FROM teams WHERE id = ?", Long.class, teamId);
+
+        String findUsersSql = "SELECT user_id FROM team_members WHERE team_id = ?";
+        List<Long> participantIds = jdbcTemplate.queryForList(findUsersSql, Long.class, teamId);
 
         String updateTeamSql = "UPDATE teams SET status = 'DISQUALIFIED'," +
                 " disqualified_reason = ?, " +
@@ -303,6 +329,12 @@ public class RankingServiceImpl implements RankingService {
 
         // String insertLogSql = "INSERT INTO audit_logs (actor_id, action_type, target_type, target_id, reason) VALUES (?, 'DISQUALIFY_TEAM', 'TEAM', ?, ?)";
         // jdbcTemplate.update(insertLogSql, userId, teamId, reason);
+        if (!participantIds.isEmpty()) {
+            String title = "⚠️ Cảnh báo: Đội thi bị đình chỉ";
+            String message = "Đội của bạn đã bị đình chỉ khỏi sự kiện. Lý do: " + reason + ". Vui lòng liên hệ Ban tổ chức nếu bạn có thắc mắc.";
+
+            notificationService.notifyUsersBatch(participantIds, eventId, "TEAM_DISQUALIFIED", title, message);
+        }
 
         log.info("Hoàn tất đình chỉ Team ID: {}.", teamId);
 
@@ -319,7 +351,16 @@ public class RankingServiceImpl implements RankingService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ScoreBreakdownResponse> getScoreBreakdown(Long teamId, Long roundId) {
+    public List<ScoreBreakdownResponse> getScoreBreakdown(Long teamId, Long roundId, boolean isCoordinator) {
+
+        // Lấy thông tin vòng thi từ Database
+        Round round = roundRepository.findById(roundId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy vòng thi với ID: " + roundId));
+
+        if (!isCoordinator && !"COMPLETED".equalsIgnoreCase(round.getStatus().name())) {
+            throw new RuntimeException("Chi tiết điểm của vòng thi này chưa được công bố!");
+        }
+
         log.info("Truy xuất chi tiết bảng điểm DTO (Score Breakdown) cho Team ID: {} tại Round ID: {}", teamId, roundId);
 
         String sql = "SELECT u.full_name AS judgeName, sc.name AS criterionName, sc.weight AS criterionWeight, " +
@@ -423,6 +464,26 @@ public class RankingServiceImpl implements RankingService {
 
         if (!nextRoundSeedRankings.isEmpty()) {
             rankingRepository.saveAll(nextRoundSeedRankings);
+        }
+
+        // 👇 BỔ SUNG LOGIC THÔNG BÁO 👇
+        if (teamIds == null || teamIds.isEmpty()) return;
+
+        // 1. Tận dụng luôn biến current đã query ở đầu hàm để lấy Event ID
+        Long eventId = current.getEvent().getId();
+
+        // 2. Lấy danh sách thành viên của TẤT CẢ các đội được thăng hạng cùng lúc
+        String inSql = String.join(",", teamIds.stream().map(String::valueOf).toArray(String[]::new));
+        String findUsersSql = "SELECT user_id FROM team_members WHERE team_id IN (" + inSql + ")";
+
+        List<Long> participantIds = jdbcTemplate.queryForList(findUsersSql, Long.class);
+
+        // 3. Bắn thông báo chúc mừng
+        if (!participantIds.isEmpty()) {
+            String title = "🎉 Chúc mừng! Đội của bạn đã được thăng hạng";
+            String message = "Tuyệt vời! Đội của bạn đã xuất sắc vượt qua vòng thi này và chính thức lọt vào vòng " + nextRound.getName() + " tiếp theo. Hãy chuẩn bị tinh thần cho thử thách mới nhé!";
+
+            notificationService.notifyUsersBatch(participantIds, eventId, "TEAM_PROMOTED", title, message);
         }
 
         log.info("Đã thăng hạng thành công {} đội sang vòng {}", teamIds.size(), nextRound.getName());
