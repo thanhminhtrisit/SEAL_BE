@@ -218,15 +218,37 @@ public class EventServiceImpl implements EventService {
         Event event = findEvent(eventId);
         validateNotPending(event);
 
-        if (roundRepository.existsByEventIdAndOrderNumber(eventId, req.orderNumber())) {
-            throw new BusinessRuleException("BR-EVT-02",
-                    "A round with order_number " + req.orderNumber() + " already exists in this event");
+        // Round-ordering invariant: at most one final round per event, and it must be the LAST one.
+        List<Round> existing = roundRepository.findByEventIdOrderByOrderNumber(eventId);
+        Round currentFinal = existing.stream()
+                .filter(r -> Boolean.TRUE.equals(r.getIsFinalRound()))
+                .findFirst().orElse(null);
+        int count = existing.size();
+
+        int insertPos;
+        if (req.finalRound()) {
+            // A final round is only allowed when none exists yet; it always goes last.
+            if (currentFinal != null) {
+                throw new BusinessRuleException("BR-EVT-15",
+                        "This event already has a final round; only one final round is allowed.");
+            }
+            insertPos = count + 1;
+        } else {
+            // A non-final round must sit BEFORE the final. Clamp the requested order so it never
+            // lands at/after the final (or past the contiguous end when there is no final yet).
+            int upperBound = currentFinal != null ? currentFinal.getOrderNumber() : count + 1;
+            int requested = req.orderNumber() != null ? req.orderNumber() : upperBound;
+            insertPos = Math.max(1, Math.min(requested, upperBound));
         }
+
+        // Make room BEFORE inserting: flushed bulk DML shifts existing rounds (incl. the final) up by 1,
+        // executed against the DB first so the new row's INSERT can't collide on uq_rounds_event_order.
+        roundRepository.shiftOrdersUp(eventId, insertPos);
 
         Round round = new Round();
         round.setEvent(event);
         round.setName(req.name());
-        round.setOrderNumber(req.orderNumber());
+        round.setOrderNumber(insertPos);
         round.setSubmissionDeadline(req.submissionDeadline());
         round.setScoringDeadline(req.scoringDeadline());
         round.setPromotionTopN(req.promotionTopN());
@@ -271,7 +293,28 @@ public class EventServiceImpl implements EventService {
         if (req.submissionDeadline() != null) round.setSubmissionDeadline(req.submissionDeadline());
         if (req.scoringDeadline() != null) round.setScoringDeadline(req.scoringDeadline());
         if (req.promotionTopN() != null) round.setPromotionTopN(req.promotionTopN());
-        if (req.finalRound() != null) round.setIsFinalRound(req.finalRound());
+        if (req.finalRound() != null) {
+            if (req.finalRound()) {
+                // Marking a round final must preserve the invariant: single final, and it must be the last round.
+                List<Round> all = roundRepository.findByEventIdOrderByOrderNumber(eventId);
+                boolean anotherFinal = all.stream()
+                        .anyMatch(r -> !r.getId().equals(roundId) && Boolean.TRUE.equals(r.getIsFinalRound()));
+                if (anotherFinal) {
+                    throw new BusinessRuleException("BR-EVT-15",
+                            "This event already has a final round; only one final round is allowed.");
+                }
+                int maxOrder = all.stream()
+                        .map(Round::getOrderNumber)
+                        .filter(java.util.Objects::nonNull)
+                        .max(Integer::compareTo)
+                        .orElse(round.getOrderNumber());
+                if (round.getOrderNumber() != null && round.getOrderNumber() < maxOrder) {
+                    throw new BusinessRuleException("BR-EVT-16",
+                            "Only the last round can be marked final; move it to the end first.");
+                }
+            }
+            round.setIsFinalRound(req.finalRound());
+        }
         if (req.requiresRepo() != null) round.setRequiresRepo(req.requiresRepo());
         if (req.requiresDemo() != null) round.setRequiresDemo(req.requiresDemo());
         if (req.requiresSlide() != null) round.setRequiresSlide(req.requiresSlide());
@@ -456,7 +499,7 @@ public class EventServiceImpl implements EventService {
     public void deleteRound(Long eventId, Long roundId) {
         Event event = findEvent(eventId);
         validateConfigEditable(event);
-        findRound(roundId, eventId);
+        Round round = findRound(roundId, eventId);
 
         if (criteriaSetRepository.existsByRoundId(roundId)) {
             throw new BusinessRuleException("BR-EVT-12",
@@ -467,7 +510,14 @@ public class EventServiceImpl implements EventService {
                     "Cannot delete round " + roundId + ": it has judge assignments. Revoke them first.");
         }
 
+        Integer deletedOrder = round.getOrderNumber();
         roundRepository.deleteById(roundId);
+
+        // Keep order numbers contiguous (1..N): pull every later round down by 1. shiftOrdersDown is
+        // flushed bulk DML, so the DELETE above is flushed first and the freed slot exists before the shift.
+        if (deletedOrder != null) {
+            roundRepository.shiftOrdersDown(eventId, deletedOrder);
+        }
     }
 
     // ─── Category (FR-EVT-04) ─────────────────────────────────────────────────

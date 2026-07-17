@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -180,15 +181,67 @@ class EventServiceImplTest {
         }
 
         @Test
-        void duplicateOrderNumber_throws_BR_EVT_02() {
+        void insertAtOccupiedOrder_shiftsExistingRoundsUpBeforeInsert() {
+            Round r1 = roundOf(11L, 1, false);
+            Round rFinal = roundOf(12L, 2, true);
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
-            when(roundRepository.existsByEventIdAndOrderNumber(1L, 1)).thenReturn(true);
+            when(roundRepository.findByEventIdOrderByOrderNumber(1L)).thenReturn(List.of(r1, rFinal));
+            when(roundRepository.save(any(Round.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            CreateRoundRequest req = new CreateRoundRequest("Round 1", 1, null, null, null, false, null, null, null, null);
+            // Insert a non-final round at the occupied order 2 (currently the final round's slot).
+            RoundResponse response = service.addRound(1L, new CreateRoundRequest(
+                    "Semifinal", 2, null, null, null, false, null, null, null, null));
 
-            assertThatThrownBy(() -> service.addRound(1L, req))
+            // The block at/after slot 2 is shifted up FIRST (flushed bulk DML), THEN the new row is saved at 2.
+            InOrder inOrder = inOrder(roundRepository);
+            inOrder.verify(roundRepository).shiftOrdersUp(1L, 2);
+            inOrder.verify(roundRepository).save(argThat(r -> r.getOrderNumber() == 2));
+            assertThat(response.orderNumber()).isEqualTo(2);
+            assertThat(response.finalRound()).isFalse();
+        }
+
+        @Test
+        void secondFinalRound_isRejected_BR_EVT_15() {
+            Round r1 = roundOf(11L, 1, false);
+            Round rFinal = roundOf(12L, 2, true);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findByEventIdOrderByOrderNumber(1L)).thenReturn(List.of(r1, rFinal));
+
+            assertThatThrownBy(() -> service.addRound(1L, new CreateRoundRequest(
+                    "Grand Final", 3, null, null, null, true, null, null, null, null)))
                     .isInstanceOf(BusinessRuleException.class)
-                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-02");
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-15");
+        }
+
+        @Test
+        void nonFinalRound_cannotBePlacedAfterTheFinal_isClampedBefore() {
+            Round r1 = roundOf(11L, 1, false);
+            Round rFinal = roundOf(12L, 2, true);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findByEventIdOrderByOrderNumber(1L)).thenReturn(List.of(r1, rFinal));
+            when(roundRepository.save(any(Round.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            // Request order 5 (past the final) → must be clamped to sit before the final (slot 2).
+            RoundResponse response = service.addRound(1L, new CreateRoundRequest(
+                    "Late Round", 5, null, null, null, false, null, null, null, null));
+
+            assertThat(response.orderNumber()).isEqualTo(2);
+            verify(roundRepository).shiftOrdersUp(1L, 2); // clamped before the final; room made first
+        }
+
+        @Test
+        void addFinalRound_whenNoneExists_placedLast() {
+            Round r1 = roundOf(11L, 1, false);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findByEventIdOrderByOrderNumber(1L)).thenReturn(List.of(r1));
+            when(roundRepository.save(any(Round.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            RoundResponse response = service.addRound(1L, new CreateRoundRequest(
+                    "Final", 1, null, null, null, true, null, null, null, null));
+
+            assertThat(response.finalRound()).isTrue();
+            assertThat(response.orderNumber()).isEqualTo(2); // last (count + 1)
+            verify(roundRepository).shiftOrdersUp(1L, 2); // no-op shift (nothing at/after 2), still ordered first
         }
 
         @Test
@@ -198,6 +251,30 @@ class EventServiceImplTest {
             assertThatThrownBy(() -> service.addRound(99L,
                     new CreateRoundRequest("R1", 1, null, null, null, false, null, null, null, null)))
                     .isInstanceOf(ResourceNotFoundException.class);
+        }
+
+        @Test
+        void markMiddleRoundAsFinal_isRejected_BR_EVT_16() {
+            Round middle = roundOf(11L, 1, false);
+            Round last = roundOf(12L, 2, false);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findById(11L)).thenReturn(Optional.of(middle));
+            when(roundRepository.findByEventIdOrderByOrderNumber(1L)).thenReturn(List.of(middle, last));
+
+            assertThatThrownBy(() -> service.updateRound(1L, 11L, new UpdateRoundRequest(
+                    null, null, null, null, true, null, null, null, null)))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-16");
+        }
+
+        private Round roundOf(long id, int order, boolean isFinal) {
+            Round r = new Round();
+            r.setId(id);
+            r.setEvent(sampleEvent);
+            r.setName("Round " + order);
+            r.setOrderNumber(order);
+            r.setIsFinalRound(isFinal);
+            return r;
         }
     }
 
@@ -721,6 +798,7 @@ class EventServiceImplTest {
 
         @Test
         void deleteRound_noDependencies_deletesSuccessfully() {
+            round.setOrderNumber(1);
             when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
             when(roundRepository.findById(10L)).thenReturn(Optional.of(round));
             when(criteriaSetRepository.existsByRoundId(10L)).thenReturn(false);
@@ -729,6 +807,22 @@ class EventServiceImplTest {
             service.deleteRound(1L, 10L);
 
             verify(roundRepository).deleteById(10L);
+        }
+
+        @Test
+        void deleteRound_reindexesLaterRoundsToStayContiguous() {
+            round.setOrderNumber(1);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findById(10L)).thenReturn(Optional.of(round));
+            when(criteriaSetRepository.existsByRoundId(10L)).thenReturn(false);
+            when(judgeAssignmentRepository.existsByRoundId(10L)).thenReturn(false);
+
+            service.deleteRound(1L, 10L);
+
+            // DELETE is issued first, THEN the gap is closed by the flushed bulk down-shift.
+            InOrder inOrder = inOrder(roundRepository);
+            inOrder.verify(roundRepository).deleteById(10L);
+            inOrder.verify(roundRepository).shiftOrdersDown(1L, 1);
         }
 
         @Test
@@ -958,6 +1052,26 @@ class EventServiceImplTest {
 
             assertThat(resp.mentorsNeeded()).isEqualTo(0);
             assertThat(resp.gap()).isEqualTo(0);
+        }
+    }
+
+    // ─── EventResponse term-plan label ────────────────────────────────────────
+
+    @Nested
+    class TermPlanLabel {
+
+        @Test
+        void eventResponse_carriesTermPlanLabel() {
+            sampleTermPlan.setTerm(TermType.FALL);
+            sampleTermPlan.setYear(2024);
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+
+            EventResponse resp = service.getById(1L);
+
+            assertThat(resp.termPlanId()).isEqualTo(1L);
+            assertThat(resp.termPlanTerm()).isEqualTo(TermType.FALL);
+            assertThat(resp.termPlanYear()).isEqualTo(2024);
+            assertThat(resp.termPlanLabel()).isEqualTo("FALL 2024");
         }
     }
 
