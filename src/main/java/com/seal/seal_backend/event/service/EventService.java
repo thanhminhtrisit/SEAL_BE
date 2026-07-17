@@ -72,4 +72,8 @@ public interface EventService {
 
     // --- Mentor Planning ---
     MentorPlanningResponse getMentorPlanning(Long eventId);
+
+    // --- Submission Monitoring (coordinator screen) ---
+    // One row per team of the event with its latest submission state for the given round.
+    List<SubmissionMonitorRow> monitorRoundSubmissions(Long eventId, Long roundId);
 }

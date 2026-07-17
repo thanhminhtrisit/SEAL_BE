@@ -452,4 +452,16 @@ public class EventController {
             @PathVariable Long roundId) {
         return ApiResponse.ok(eventService.listJudgeAssignments(eventId, roundId));
     }
+
+    // ─── Submission Monitoring (coordinator screen) ───────────────────────────
+
+    @GetMapping("/{eventId}/rounds/{roundId}/submissions")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Submission monitoring: every team of the event with its latest submission state for the round",
+               description = "One row per team; status is the latest SubmissionStatus or NOT_SUBMITTED when the team has not submitted.")
+    public ApiResponse<List<SubmissionMonitorRow>> monitorRoundSubmissions(
+            @PathVariable Long eventId,
+            @PathVariable Long roundId) {
+        return ApiResponse.ok(eventService.monitorRoundSubmissions(eventId, roundId));
+    }
 }

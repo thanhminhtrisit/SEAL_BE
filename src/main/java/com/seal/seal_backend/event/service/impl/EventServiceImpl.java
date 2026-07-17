@@ -24,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -1014,6 +1016,46 @@ public class EventServiceImpl implements EventService {
         int gap = (int) Math.max(0L, mentorsNeeded - currentMentors);
         return new MentorPlanningResponse(eventId, activeTeams, maxTeamsPerMentor,
                 mentorsNeeded, currentMentors, gap);
+    }
+
+    // ─── Submission Monitoring (coordinator screen) ───────────────────────────
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SubmissionMonitorRow> monitorRoundSubmissions(Long eventId, Long roundId) {
+        findEvent(eventId); // validate the event exists
+        Round round = roundRepository.findById(roundId)
+                .orElseThrow(() -> new ResourceNotFoundException("Round not found: " + roundId));
+        if (!round.getEvent().getId().equals(eventId)) {
+            throw new BusinessRuleException("BR-EVT-17",
+                    "Round " + roundId + " does not belong to event " + eventId + ".");
+        }
+
+        // Load teams + all of the round's submissions in two queries, then group in memory (no N+1).
+        List<Team> teams = teamRepository.findByEventIdOrderByCreatedAtAsc(eventId);
+        Map<Long, Submission> latestByTeam = new HashMap<>();
+        for (Submission s : submissionRepository.findByRoundId(roundId)) {
+            Long teamId = s.getTeam().getId();
+            Submission current = latestByTeam.get(teamId);
+            if (current == null || s.getAttemptNumber() > current.getAttemptNumber()) {
+                latestByTeam.put(teamId, s); // keep the highest attempt number per team
+            }
+        }
+
+        return teams.stream().map(t -> {
+            Category category = t.getCategory();
+            Long categoryId = category != null ? category.getId() : null;
+            String categoryName = category != null ? category.getName() : null;
+
+            Submission latest = latestByTeam.get(t.getId());
+            if (latest == null) {
+                return new SubmissionMonitorRow(t.getId(), t.getName(), categoryId, categoryName,
+                        SubmissionMonitorRow.NOT_SUBMITTED, null, null, null, null, null, null);
+            }
+            return new SubmissionMonitorRow(t.getId(), t.getName(), categoryId, categoryName,
+                    latest.getStatus().name(), latest.getAttemptNumber(), latest.getSubmittedAt(),
+                    latest.getRepoUrl(), latest.getDemoUrl(), latest.getSlideUrl(), latest.getReportUrl());
+        }).toList();
     }
 
     private void validateNotPending(Event event) {

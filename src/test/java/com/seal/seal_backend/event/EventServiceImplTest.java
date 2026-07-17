@@ -10,6 +10,7 @@ import com.seal.seal_backend.domain.enums.AssignmentStatus;
 import com.seal.seal_backend.domain.enums.EventStatus;
 import com.seal.seal_backend.domain.enums.EventType;
 import com.seal.seal_backend.domain.enums.ResourceType;
+import com.seal.seal_backend.domain.enums.SubmissionStatus;
 import com.seal.seal_backend.domain.enums.TermType;
 import com.seal.seal_backend.domain.repository.*;
 import com.seal.seal_backend.domain.enums.RoundStatus;
@@ -1072,6 +1073,107 @@ class EventServiceImplTest {
             assertThat(resp.termPlanTerm()).isEqualTo(TermType.FALL);
             assertThat(resp.termPlanYear()).isEqualTo(2024);
             assertThat(resp.termPlanLabel()).isEqualTo("FALL 2024");
+        }
+    }
+
+    // ─── Submission Monitoring (coordinator screen) ───────────────────────────
+
+    @Nested
+    class SubmissionMonitoring {
+
+        private Round round;
+        private Category category;
+
+        @org.junit.jupiter.api.BeforeEach
+        void setup() {
+            category = new Category();
+            category.setId(20L);
+            category.setName("Web Application");
+            category.setEvent(sampleEvent);
+
+            round = new Round();
+            round.setId(10L);
+            round.setEvent(sampleEvent);
+            round.setName("Round 1");
+            round.setOrderNumber(1);
+        }
+
+        private Team team(long id, String name) {
+            Team t = new Team();
+            t.setId(id);
+            t.setName(name);
+            t.setEvent(sampleEvent);
+            t.setCategory(category);
+            return t;
+        }
+
+        private Submission submission(Team t, int attempt, SubmissionStatus status) {
+            Submission s = new Submission();
+            s.setId(t.getId() * 10 + attempt);
+            s.setTeam(t);
+            s.setRound(round);
+            s.setAttemptNumber(attempt);
+            s.setStatus(status);
+            s.setSubmittedAt(LocalDateTime.of(2026, 7, 1, 10, attempt, 0));
+            s.setRepoUrl("https://repo/" + t.getId() + "/" + attempt);
+            return s;
+        }
+
+        @Test
+        void perTeamLatestState_isReturned() {
+            Team a = team(1L, "Alpha");   // SUBMITTED across 2 attempts → latest (#2) wins
+            Team b = team(2L, "Bravo");   // no submission → NOT_SUBMITTED
+            Team c = team(3L, "Charlie"); // single LATE_REJECTED attempt
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findById(10L)).thenReturn(Optional.of(round));
+            when(teamRepository.findByEventIdOrderByCreatedAtAsc(1L)).thenReturn(List.of(a, b, c));
+            when(submissionRepository.findByRoundId(10L)).thenReturn(List.of(
+                    submission(a, 1, SubmissionStatus.SUBMITTED),
+                    submission(a, 2, SubmissionStatus.SUBMITTED),
+                    submission(c, 1, SubmissionStatus.LATE_REJECTED)));
+
+            List<SubmissionMonitorRow> rows = service.monitorRoundSubmissions(1L, 10L);
+
+            assertThat(rows).hasSize(3);
+
+            SubmissionMonitorRow rowA = rows.get(0);
+            assertThat(rowA.teamId()).isEqualTo(1L);
+            assertThat(rowA.teamName()).isEqualTo("Alpha");
+            assertThat(rowA.status()).isEqualTo("SUBMITTED");
+            assertThat(rowA.latestAttemptNumber()).isEqualTo(2); // highest attempt returned
+            assertThat(rowA.categoryId()).isEqualTo(20L);
+            assertThat(rowA.categoryName()).isEqualTo("Web Application");
+            assertThat(rowA.repoUrl()).isEqualTo("https://repo/1/2");
+            assertThat(rowA.submittedAt()).isEqualTo(LocalDateTime.of(2026, 7, 1, 10, 2, 0));
+
+            SubmissionMonitorRow rowB = rows.get(1);
+            assertThat(rowB.teamId()).isEqualTo(2L);
+            assertThat(rowB.status()).isEqualTo("NOT_SUBMITTED");
+            assertThat(rowB.latestAttemptNumber()).isNull();
+            assertThat(rowB.submittedAt()).isNull();
+            assertThat(rowB.repoUrl()).isNull();
+
+            SubmissionMonitorRow rowC = rows.get(2);
+            assertThat(rowC.teamId()).isEqualTo(3L);
+            assertThat(rowC.status()).isEqualTo("LATE_REJECTED");
+            assertThat(rowC.latestAttemptNumber()).isEqualTo(1);
+        }
+
+        @Test
+        void roundNotBelongingToEvent_throws_BR_EVT_17() {
+            Event otherEvent = new Event();
+            otherEvent.setId(2L);
+            Round foreignRound = new Round();
+            foreignRound.setId(99L);
+            foreignRound.setEvent(otherEvent);
+
+            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+            when(roundRepository.findById(99L)).thenReturn(Optional.of(foreignRound));
+
+            assertThatThrownBy(() -> service.monitorRoundSubmissions(1L, 99L))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasFieldOrPropertyWithValue("ruleCode", "BR-EVT-17");
         }
     }
 
